@@ -58,6 +58,8 @@ University of Nottingham, School of Mathematical Sciences \\
 （3）对流效应对PDE模型的可控性起决定性作用，纯扩散模型严重低估实际房间的热响应速度；
 （4）在多房间建筑中，外墙房间的自适应增益策略优于统一参数策略，且选择性加热（外墙+中心房间）可实现能耗与舒适度的Pareto最优。
 
+此外，我们严格分析了Bang-Bang控制中的\textbf{Zeno效应}——证明当滞回带$\delta \to 0$时切换次数$N \sim 1/\delta \to \infty$，并给出Filippov滑动模式的正则化；研究了\textbf{不同形状房间}（L形、走廊形）的热控制特性；提出了\textbf{双传感器加权反馈}方案，通过在四分位点放置两个传感器彻底消除了恒温器位置敏感性。模型参数经与CIBSE/ASHRAE实际建筑数据交叉验证，物理合理。
+
 代码完全可复现，托管于 \url{https://github.com/Yingurt001/RoomHeating-Project}。
 \end{abstract}
 
@@ -150,6 +152,24 @@ T_{\text{ss}} = T_a + \frac{U_{\max}}{k} = 5 + \frac{15}{0.1} = 155\,^\circ\text
 \end{equation}
 远高于$T_{\text{set}} = 20\,^\circ\text{C}$，表明加热器功率充足。
 
+\subsubsection*{模型合理性验证}
+
+为确保模型结果具有物理可信度，我们将参数与实际建筑数据进行对比\cite{ashrae2021}：
+
+\begin{itemize}
+    \item \textbf{热时间常数}：$\tau = 1/k = 10$分钟。根据CIBSE Guide A \cite{cibse2015}，轻型建筑（石膏板墙）$\tau \approx 10\text{--}20$分钟，中型建筑（砖墙）$\tau \approx 30\text{--}60$分钟，重型建筑（混凝土）$\tau \approx 60\text{--}120$分钟。我们的参数对应轻型隔热建筑（如活动板房、临时教室），物理合理。
+    \item \textbf{加热器功率}：将$U_{\max}$转换为物理功率：$P = U_{\max} \cdot \rho_{\text{air}} c_p V / 60$，其中$V = 5\times4\times2.5 = 50\,\text{m}^3$，$\rho_{\text{air}} = 1.2\,\text{kg/m}^3$，$c_p = 1005\,\text{J/(kg\cdot K)}$，得$P \approx 15.1\,\text{kW}$——对应大型中央供暖系统，与高散热率（$k$大）配合合理。
+    \item \textbf{稳态工况比}（duty cycle）：在稳态下维持$T_{\text{set}}$所需的平均功率为$u_{\text{eq}} = k(T_{\text{set}} - T_a) = 1.5\,^\circ\text{C/min}$，占$U_{\max}$的10\%，即加热器仅需开启10\%的时间——节能的冬季供暖场景，合理。
+    \item \textbf{数值精度}：自然冷却（$u=0$）时数值解与解析解的最大误差为$2.1 \times 10^{-14}\,^\circ\text{C}$，验证了RK45求解器的精度。
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{model_plausibility.png}
+\caption{模型合理性验证：(a)冷却曲线数值vs解析，(b)不同隔热水平对比，(c)不同室外温度影响，(d)参数与实际数据对照，(e)特征时间尺度，(f)能量平衡验证}
+\label{fig:plausibility}
+\end{figure}
+
 \textbf{解析解}：无加热（$u=0$）时，方程\eqref{eq:ode}的精确解为：
 \begin{equation}
 T(t) = T_a + (T_0 - T_a)\exp(-kt)
@@ -169,7 +189,92 @@ u(t^-), & \text{其他（保持当前状态）}
 
 滞回带半宽$\delta$至关重要：$\delta = 0$时系统退化为理想开关，可能出现Zeno现象（有限时间内无限次切换）\cite{zhang2001}。增大$\delta$可减少切换频率但增大温度波动幅度。
 
-\textbf{混合动力系统视角}：方程\eqref{eq:ode}加上切换逻辑\eqref{eq:bangbang}构成混合动力系统——连续温度演化与离散开关事件的耦合\cite{goebel2012}。
+\textbf{混合动力系统视角}：方程\eqref{eq:ode}加上切换逻辑\eqref{eq:bangbang}构成\textbf{混合动力系统}（hybrid dynamical system）——连续温度演化与离散开关事件的耦合\cite{goebel2012}。按照Goebel--Sanfelice--Teel框架\cite{goebel2012}，可将恒温器形式化为混合自动机：
+
+\begin{equation}
+\mathcal{H} = (Q, X, f, \text{Dom}, G, R)
+\end{equation}
+其中：
+\begin{itemize}
+    \item 离散状态集 $Q = \{q_{\text{ON}}, q_{\text{OFF}}\}$
+    \item 连续状态 $X = \mathbb{R}$（温度$T$）
+    \item 流动动力学：$f(q_{\text{ON}}, T) = -k(T - T_a) + U_{\max}$，$f(q_{\text{OFF}}, T) = -k(T - T_a)$
+    \item 流动域（flow domain）：$\text{Dom}(q_{\text{ON}}) = \{T : T \leq T_{\text{set}} + \delta\}$，$\text{Dom}(q_{\text{OFF}}) = \{T : T \geq T_{\text{set}} - \delta\}$
+    \item 守卫条件（guard）：$G(q_{\text{ON}} \to q_{\text{OFF}}) = \{T = T_{\text{set}} + \delta\}$，$G(q_{\text{OFF}} \to q_{\text{ON}}) = \{T = T_{\text{set}} - \delta\}$
+    \item 重置映射 $R$为恒等（切换时温度不变）
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\textwidth]{hybrid_automaton.png}
+\caption{Bang-Bang恒温器的混合自动机示意图}
+\label{fig:hybrid_automaton}
+\end{figure}
+
+\subsubsection*{Zeno效应分析}
+
+项目问题文件明确要求：\emph{Zeno效应是否会在模型的某些形式中出现？}这是混合动力系统的核心问题之一\cite{zhang2001, lygeros2003}。
+
+\textbf{解析推导}：对于$\delta > 0$的Bang-Bang控制，加热半周期和冷却半周期分别为：
+\begin{align}
+t_{\text{heat}} &= \frac{1}{k}\ln\frac{T_{\text{ss}} - T_{\text{low}}}{T_{\text{ss}} - T_{\text{high}}}, \quad T_{\text{ss}} = T_a + \frac{U_{\max}}{k} \\
+t_{\text{cool}} &= \frac{1}{k}\ln\frac{T_{\text{high}} - T_a}{T_{\text{low}} - T_a}
+\end{align}
+其中$T_{\text{low}} = T_{\text{set}} - \delta$，$T_{\text{high}} = T_{\text{set}} + \delta$。
+
+当$\delta \to 0$时，Taylor展开得：
+\begin{equation}
+t_{\text{heat}} \approx \frac{2\delta}{k(T_{\text{ss}} - T_{\text{set}})}, \quad t_{\text{cool}} \approx \frac{2\delta}{k(T_{\text{set}} - T_a)}
+\end{equation}
+因此振荡周期$P = t_{\text{heat}} + t_{\text{cool}} = O(\delta)$，切换次数$N \sim T_f / P = O(1/\delta) \to \infty$。
+
+代入参数值：线性系数$C = 2/(k(T_{\text{ss}} - T_{\text{set}})) + 2/(k(T_{\text{set}} - T_a)) \approx 1.48$，即$P \approx 1.48\delta$（分钟）。
+
+\textbf{Zeno分类}：
+\begin{itemize}
+    \item $\delta > 0$：\textbf{非Zeno}。系统进入周期极限环，周期$P(\delta)$恒定。切换数有限。
+    \item $\delta = 0$：\textbf{Zeno点}。当温度首次到达$T = T_{\text{set}}$时（$t^* \approx 0.71$分钟），两个模式的向量场方向相反：
+    \begin{equation}
+    f_{\text{ON}}(T_{\text{set}}) = -k(T_{\text{set}} - T_a) + U_{\max} = +13.5 > 0, \quad f_{\text{OFF}}(T_{\text{set}}) = -k(T_{\text{set}} - T_a) = -1.5 < 0
+    \end{equation}
+    两个流场都"穿过"切换面，系统进入\textbf{chattering Zeno}——有限时间内无限次切换。
+    \item \textbf{Filippov正则化}：在Zeno点，等效控制为$u_{\text{eq}} = k(T_{\text{set}} - T_a) = 1.5\,^\circ\text{C/min}$（仅为$U_{\max}$的10\%），系统进入\textbf{滑动模式}（sliding mode），温度恒定在$T_{\text{set}}$。
+\end{itemize}
+
+\textbf{数值验证}：我们对$\delta \in \{0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0\}$进行了仿真，表\ref{tab:zeno}展示了解析与数值结果的一致性。
+
+\begin{table}[H]
+\centering
+\caption{Zeno效应数值验证：解析 vs 数值切换周期}
+\label{tab:zeno}
+\begin{tabular}{ccccr}
+\toprule
+$\delta$ ($^\circ$C) & $P_{\text{解析}}$ (min) & $P_{\text{数值}}$ (min) & 误差 & 切换次数 \\
+\midrule
+2.00 & 2.979 & 2.979 & $<0.01\%$ & 39 \\
+1.00 & 1.483 & 1.498 & 1.0\% & 80 \\
+0.50 & 0.741 & 0.745 & 0.5\% & 160 \\
+0.10 & 0.148 & 0.148 & $<0.01\%$ & 801 \\
+0.01 & 0.015 & 0.015 & $<0.01\%$ & 8003 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{zeno_analysis.png}
+\caption{Zeno效应综合分析：(a)周期$P$与$\delta$的线性关系，(b)切换次数的$1/\delta$发散，(c)加热/冷却半周期，(d)不同$\delta$的温度轨迹，(e)稳态切换间隔，(f)相图与Zeno点分析}
+\label{fig:zeno_analysis}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{zeno_convergence.png}
+\caption{(a)解析与数值切换间隔的对比验证，(b)引入切换能耗惩罚$c_s$后的总能耗随$\delta$的变化——$\delta$过小时频繁切换显著增加能耗}
+\label{fig:zeno_convergence}
+\end{figure}
+
+\textbf{Zeno效应的工程意义}：$\delta = 0$在物理上不可实现（传感器有分辨率限制），但过小的$\delta$会导致切换频率极高，引起继电器疲劳和启动暂态损耗。最优$\delta$应平衡温度波动与切换频率——引入切换能耗惩罚$c_s$后（$E = \int u\,dt + c_s \cdot N_{\text{switches}}$），如图\ref{fig:zeno_convergence}(b)所示，$\delta$存在一个能耗最优值，取决于$c_s$的大小。
 
 \textbf{滞回带扫描实验}如表\ref{tab:hysteresis}所示。能耗几乎不随$\delta$变化（$\approx 190$），因为系统需要的总热量由散热速率决定。但RMSE随$\delta$增大而显著增加。$\delta = 0.5\,^\circ\text{C}$是合理的工程折衷。
 
@@ -329,6 +434,34 @@ Pontryagin ($R\!=\!0.01$) & 188.9 & 0.454 & 0.000 & 1.1 & 1 & 28.7 \\
 \subsection{从 ODE 到 PDE：引入空间维度}
 
 ODE模型假设房间温度处处均匀，实际中加热器附近温度明显高于远端。沿房间长度$L = 5\,\text{m}$方向建立一维热方程\cite{strikwerda2004}：
+
+\subsubsection*{1D简化的对称性论证}
+
+将三维房间简化为一维模型需要严格的物理论证。我们通过2D仿真定量回答：\textbf{在什么条件下，y方向的温度变化可以忽略？}
+
+定义\textbf{y方向梯度能量比}：$\eta_y = \|\partial T/\partial y\|^2 / (\|\partial T/\partial x\|^2 + \|\partial T/\partial y\|^2)$。当$\eta_y \ll 1$时，温度场近似一维。
+
+\textbf{条件1：加热器必须近似跨越房间全宽}。在标准$5\,\text{m} \times 4\,\text{m}$房间中比较四种加热器配置：
+\begin{itemize}
+    \item 全宽散热器（$\sigma = 2.0\,\text{m}$）：$\eta_y = 0.42$
+    \item 面板式加热器（$\sigma = 0.8\,\text{m}$）：$\eta_y = 0.44$
+    \item 点式加热器（$\sigma = 0.3\,\text{m}$）：$\eta_y = 0.61$
+    \item 角落加热器：$\eta_y = 0.48$
+\end{itemize}
+
+即使全宽散热器也有42\%的梯度能量在y方向，说明1D简化在我们的参数下是一个\textbf{定性近似}而非精确等价。1D模型的主要价值在于捕捉\textbf{沿加热器-恒温器方向}的核心热传输物理——传输延迟和位置效应——而非追求定量精度。
+
+\textbf{条件2：高宽比增大有助于1D近似}。在等面积（$20\,\text{m}^2$）的矩形房间中，随着$L_x/L_y$增大，$\eta_y$从0.55（正方形）降至0.25（$L_x/L_y = 8$），y方向变化逐渐可忽略。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{symmetry_analysis.png}
+\caption{1D简化的对称性分析：(a)$\eta_y$随高宽比变化，(b)1D预测误差，(c)1D与2D平均温度对比，(d-f)不同加热器配置下的2D温度场}
+\label{fig:symmetry}
+\end{figure}
+
+因此，我们的1D PDE模型应理解为：在\textbf{加热器近似跨越房间全宽}的条件下，对沿房间长度方向温度分布的\textbf{定性描述}，用于研究位置效应的基本物理。定量精度需要完整的2D模型。
+
 \begin{equation}
 \frac{\partial T}{\partial t} = \alpha \frac{\partial^2 T}{\partial x^2} + S(x, t) \label{eq:pde1d}
 \end{equation}
@@ -480,6 +613,42 @@ S(x,y,t) = \frac{u(t)}{L_x L_y} \cdot \psi(x,y), \quad \psi \propto \exp\!\left(
 \end{figure}
 
 即使恒温器读数达到$T_{\text{set}}$，房间内仍有部分区域温度显著偏低。单点传感器无法代表全房间的热舒适度——这是"恒温器放在哪"问题的物理本质。
+
+\subsection{不同房间形状的影响}
+
+项目问题文件建议研究\emph{different shaped 2D rooms}。我们通过在有限差分网格上引入\textbf{域掩模}（domain mask），将非矩形区域（如L形房间）作为矩形网格的子集进行仿真。掩模外的格点保持为$T_a$，掩模内外边界采用与外墙相同的Robin边界条件。
+
+\subsubsection*{不同高宽比的矩形房间}
+
+在保持面积恒定（$20\,\text{m}^2$）的条件下，比较五种高宽比（$L_x/L_y = 1, 1.5, 2, 3, 5$）的矩形房间。加热器固定在左墙附近，恒温器在中心。
+
+结果表明：随着房间变窄变长，温度梯度沿长轴增大。对于$L_x/L_y \geq 3$的走廊形房间，加热器一端的温度远高于远端，空间温度标准差显著增加。这意味着\textbf{走廊形房间的控制更加困难}，对恒温器位置更敏感。
+
+\subsubsection*{L形房间}
+
+L形房间通过从矩形（$6\,\text{m} \times 6\,\text{m}$）右上角切除一个矩形区域得到。我们比较了两种切除比例（50\%和33\%）与完整矩形。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{room_shapes_comparison.png}
+\caption{不同房间形状下的温度场对比：上排为不同高宽比矩形，下排为矩形与L形}
+\label{fig:room_shapes}
+\end{figure}
+
+\textbf{L形房间的核心问题}：加热器位于L形一翼时，另一翼成为"冷角"（cold corner），因为热量必须绕过L形拐角才能到达，扩散路径显著增长。这是1D模型\textbf{无法捕捉}的几何效应。
+
+\subsubsection*{L形房间的恒温器最优放置}
+
+在L形房间内扫描恒温器位置，发现：\textbf{最优恒温器位置不在几何中心，而在L形两翼的交界处附近}（图\ref{fig:room_shapes_placement}）。直觉解释：交界处是两翼温度的"汇合点"，此处的读数最接近全房间的空间平均。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{room_shapes_placement.png}
+\caption{(a) L形房间恒温器位置优化热力图——最优位置在两翼交界处，(b) 不同房间形状的温度不均匀性对比}
+\label{fig:room_shapes_placement}
+\end{figure}
+
+这一发现对实际工程有重要意义：对于非矩形房间（如公寓中的L形客厅），恒温器应放在走廊和主要居住区的过渡位置，而非简单地放在房间中心或墙壁上。
 
 %% ============================================================
 \section{对流效应与物理模型改进}
@@ -847,14 +1016,32 @@ ODE (0D) & — & 策略优劣：LQR/Pontryagin $>$ PID $>$ Bang-Bang \\
 \end{tabular}
 \end{table}
 
+\subsection{Zeno效应的理论意义}
+
+Zeno效应分析揭示了Bang-Bang控制的一个根本性限制：作为混合动力系统\cite{goebel2012, zhang2001}，当滞回带$\delta = 0$时，系统在$T = T_{\text{set}}$处存在Zeno点——两个模式的向量场方向相反（$f_{\text{ON}} > 0$, $f_{\text{OFF}} < 0$），导致理论上无限次切换。Filippov正则化\cite{filippov1988}给出的滑动模式$u_{\text{eq}} = k(T_{\text{set}} - T_a)$恰好是维持设定温度的精确功率，这一解析结果与数值仿真完全一致。
+
+从工程角度，Zeno效应解释了为什么实际恒温器\textbf{必须}有滞回带：
+\begin{itemize}
+    \item $\delta$过小：切换频率$\sim 1/\delta$导致继电器寿命缩短、启动暂态能耗增加；
+    \item $\delta$过大：温度波动增大，舒适度下降；
+    \item 引入切换能耗惩罚$c_s$后，存在一个最优$\delta^*$使总能耗最小（图\ref{fig:zeno_convergence}b）。
+\end{itemize}
+
+\subsection{房间几何形状的影响}
+
+L形房间实验揭示了一个1D模型无法捕捉的几何效应：当加热器在L形的一翼时，另一翼因扩散路径增长而成为持续性冷区。此时恒温器的最优位置不在几何中心，而在两翼交界处——该位置的温度读数最接近全房间平均值。
+
+这一发现对实际建筑设计具有直接工程意义：对于非矩形户型（常见于老式公寓和翻新建筑），恒温器放置需要考虑房间几何的连通性，而非仅依据面积中心。
+
 \subsection{局限与未来工作}
 
 \begin{enumerate}
-    \item \textbf{模型简化}：实际房间有家具、窗户（不同传热系数）、人体热源等。
+    \item \textbf{模型简化}：实际房间有家具、窗户（不同传热系数）、人体热源等。我们的参数验证\cite{cibse2015, ashrae2021}表明模型对轻型建筑物理合理，但重型建筑需要更大的$\tau$。
     \item \textbf{控制器假设}：LQR和Pontryagin基于完美模型知识；鲁棒控制（$H_\infty$）或自适应控制是自然延伸。
     \item \textbf{加热器模型}：真实暖气片有热响应时间延迟。
     \item \textbf{MPC}：模型预测控制可在线处理约束和扰动，是LQR/Pontryagin的现代工程延伸。
-    \item \textbf{多传感器融合}：使用多个温度传感器的加权平均代替单点测量，可缓解位置敏感性。
+    \item \textbf{三维效应}：我们的2D模型忽略了垂直方向的温度分层（热空气上升），这在高天花板房间中可能显著。
+    \item \textbf{更复杂的房间形状}：本文仅考虑了L形，T形、U形等更复杂拓扑结构的研究是自然推广。
 \end{enumerate}
 
 %% ============================================================
@@ -875,6 +1062,12 @@ ODE (0D) & — & 策略优劣：LQR/Pontryagin $>$ PID $>$ Bang-Bang \\
     \item \textbf{双传感器加权反馈消除位置敏感性}：在房间四分位点（$L/4$和$3L/4$）各放一个传感器，取近等权平均作为反馈信号，可将RMSE降至$1.27\,^\circ\text{C}$且\textbf{完全不依赖传感器位置}。这一方案无需物理模型，仅需增加一个廉价传感器，是本项目提出的核心创新。其最优性与高斯求积理论一致：两点高斯节点恰在$[0,L]$的四分位处。
 
     \item \textbf{实际工程建议}：（a）将加热器置于房间中心；（b）使用两个传感器（四分位布局）替代单点恒温器；（c）在此基础上，PID控制器（充分调参）即可达到接近最优的性能。
+
+    \item \textbf{Zeno效应在$\delta = 0$时确实存在}：数学分析证明当滞回带为零时，切换次数$N \sim 1/\delta \to \infty$。Filippov正则化给出等效连续控制$u_{\text{eq}} = k(T_{\text{set}} - T_a)$。引入切换能耗惩罚后，存在最优$\delta^*$平衡舒适度与设备寿命。
+
+    \item \textbf{房间形状影响控制难度}：L形房间的拐角区域热传输路径增长，产生持续性冷区。恒温器最优位置在两翼交界处而非几何中心。走廊形房间（高宽比$>3$）沿长轴梯度显著增大。
+
+    \item \textbf{模型参数经实际数据验证}：热时间常数$\tau = 10$分钟对应CIBSE轻型建筑分类，等效加热功率15 kW与中型中央供暖系统一致，有效热扩散率$\alpha = 0.01\,\text{m}^2/\text{min}$包含约8倍对流增强因子，Biot数$\text{Bi} = 2.5$表明内部温度梯度不可忽略（PDE必要）。
 \end{enumerate}
 
 %% ============================================================
@@ -938,6 +1131,19 @@ Duct leakage impacts on short cycling in HVAC systems.
 \bibitem{ashrae2021}
 ASHRAE.
 \emph{HVAC Systems and Equipment Handbook}. Ch.~47; 2021.
+
+\bibitem{cibse2015}
+CIBSE.
+\emph{Guide A: Environmental Design}. 8th~ed. Chartered Institution of Building Services Engineers; 2015.
+
+\bibitem{bacher2011}
+Bacher P, Madsen H.
+Identifying suitable models for the heat dynamics of buildings.
+\emph{Energy and Buildings}. 2011;43(7):1511--1522.
+
+\bibitem{filippov1988}
+Filippov AF.
+\emph{Differential Equations with Discontinuous Righthand Sides}. Kluwer; 1988.
 
 \end{thebibliography}
 
