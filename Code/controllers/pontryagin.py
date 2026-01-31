@@ -50,7 +50,8 @@ def optimal_control_from_costate(lam, R, U_max):
 
 
 def pontryagin_bvp(Q=1.0, R=0.01, T0=T_INITIAL, T_set=T_SET, T_a=T_AMBIENT,
-                    k=K_COOL, U_max=U_MAX, t_end=T_END, n_nodes=500):
+                    k=K_COOL, U_max=U_MAX, t_end=T_END, n_nodes=500,
+                    continuation=True, verbose=False):
     """
     Solve the optimal control problem using Pontryagin's minimum principle.
 
@@ -58,6 +59,10 @@ def pontryagin_bvp(Q=1.0, R=0.01, T0=T_INITIAL, T_set=T_SET, T_a=T_AMBIENT,
         dT/dt = -k*(T - T_a) + u*(lambda)
         d_lambda/dt = -2*Q*(T - T_set) + k*lambda
         T(0) = T0,  lambda(t_end) = 0
+
+    Uses a continuation method for robust convergence: starts with large R
+    (easy problem), then gradually decreases R toward the target value,
+    using each solution as the initial guess for the next.
 
     Parameters
     ----------
@@ -79,6 +84,10 @@ def pontryagin_bvp(Q=1.0, R=0.01, T0=T_INITIAL, T_set=T_SET, T_a=T_AMBIENT,
         Final time.
     n_nodes : int
         Number of mesh nodes for BVP solver.
+    continuation : bool
+        If True, use continuation method for small R values.
+    verbose : bool
+        Print progress information.
 
     Returns
     -------
@@ -93,30 +102,66 @@ def pontryagin_bvp(Q=1.0, R=0.01, T0=T_INITIAL, T_set=T_SET, T_a=T_AMBIENT,
     sol : OdeSolution
         The full BVP solution object.
     """
-    # Normalised time on [0, 1], then scale
+
+    def _solve_single(Q_val, R_val, t_mesh, y_guess):
+        """Solve BVP for a single (Q, R) pair."""
+        def ode(t, y):
+            T_val = y[0]
+            lam = y[1]
+            u = optimal_control_from_costate(lam, R_val, U_max)
+            dTdt = -k * (T_val - T_a) + u
+            dldt = -2.0 * Q_val * (T_val - T_set) + k * lam
+            return np.vstack([dTdt, dldt])
+
+        def bc(ya, yb):
+            return np.array([
+                ya[0] - T0,
+                yb[1] - 0.0
+            ])
+
+        sol = solve_bvp(ode, bc, t_mesh, y_guess, tol=1e-4, max_nodes=10000)
+        return sol
+
     t_mesh = np.linspace(0, t_end, n_nodes)
 
-    def ode(t, y):
-        T_val = y[0]
-        lam = y[1]
-        u = optimal_control_from_costate(lam, R, U_max)
-        dTdt = -k * (T_val - T_a) + u
-        dldt = -2.0 * Q * (T_val - T_set) + k * lam
-        return np.vstack([dTdt, dldt])
-
-    def bc(ya, yb):
-        # ya = [T(0), lambda(0)], yb = [T(t_end), lambda(t_end)]
-        return np.array([
-            ya[0] - T0,        # T(0) = T0
-            yb[1] - 0.0        # lambda(t_end) = 0  (transversality)
-        ])
-
     # Initial guess: linear interpolation for T, zero for lambda
-    T_guess = T0 + (T_set - T0) * t_mesh / t_end
-    lam_guess = np.zeros_like(t_mesh)
+    T_guess = T0 + (T_set - T0) * np.minimum(t_mesh / (t_end * 0.3), 1.0)
+    lam_guess = -2.0 * R * (T_guess - T_set)  # heuristic costate guess
     y_guess = np.vstack([T_guess, lam_guess])
 
-    sol = solve_bvp(ode, bc, t_mesh, y_guess, tol=1e-4, max_nodes=10000)
+    if continuation and R < 0.5:
+        # Continuation: solve easy problems first, then refine
+        R_sequence = []
+        R_cur = max(R, 0.001)
+        R_start = 2.0
+        while R_start > R_cur * 1.5:
+            R_sequence.append(R_start)
+            R_start /= 3.0
+        R_sequence.append(R_cur)
+
+        if verbose:
+            print(f"  Continuation: R sequence = {[f'{r:.4f}' for r in R_sequence]}")
+
+        current_mesh = t_mesh
+        current_guess = y_guess
+
+        for i, R_step in enumerate(R_sequence):
+            sol = _solve_single(Q, R_step, current_mesh, current_guess)
+            if sol.success:
+                current_mesh = sol.x
+                current_guess = sol.y
+                if verbose:
+                    print(f"    R={R_step:.4f}: converged ({len(sol.x)} nodes)")
+            else:
+                if verbose:
+                    print(f"    R={R_step:.4f}: FAILED, using last good solution")
+                if i > 0:
+                    break
+                # Even the easiest problem failed — fall through to direct solve
+                sol = _solve_single(Q, R, t_mesh, y_guess)
+                break
+    else:
+        sol = _solve_single(Q, R, t_mesh, y_guess)
 
     if not sol.success:
         print(f"Warning: BVP solver did not converge: {sol.message}")
