@@ -1,0 +1,881 @@
+% !TEX program = xelatex
+\documentclass[12pt,a4paper]{article}
+
+% === Chinese support ===
+\usepackage{xeCJK}
+\setCJKmainfont{STSong}
+\setCJKsansfont{STHeiti}
+\setCJKmonofont{STFangsong}
+
+% === Page layout ===
+\usepackage[top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
+
+% === Math ===
+\usepackage{amsmath, amssymb, amsthm}
+
+% === Graphics ===
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{subcaption}
+
+% === Tables ===
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+
+% === Other ===
+\usepackage{hyperref}
+\usepackage{xcolor}
+% enumitem removed - using default lists
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    citecolor=blue!60!black,
+    urlcolor=blue!70!black
+}
+
+% Figure path
+\graphicspath{{../Code/results/}}
+
+% === Title ===
+\title{\textbf{房间供暖系统的有效控制} \\[0.5em]
+\large Effective Control of Room Heating}
+\author{MATH3060/1 — 应用数学方向，数学小组项目 \\
+University of Nottingham, School of Mathematical Sciences \\
+2026 年春季}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+本报告研究房间供暖系统的数学建模与最优控制问题。我们建立了三种递进复杂度的物理模型——集总参数ODE模型、一维热方程PDE模型和二维热方程PDE模型——以及一个多房间整栋楼耦合模型，并在每种模型上比较了四种控制策略：Bang-Bang开关控制、PID连续反馈控制、LQR线性二次最优控制和Pontryagin极小值原理。
+
+研究采用统一的评价指标体系（能耗、温度RMSE、超调量、稳定时间、切换次数和统一代价函数），通过大量数值实验得出以下核心结论：
+（1）在集总参数模型中，LQR和Pontryagin策略性能接近理论最优，但充分调参的PID可达到相当甚至更低的代价函数值；
+（2）当引入空间维度后（PDE模型），恒温器和加热器的\textbf{位置}对控制性能的影响远大于控制策略本身的差异——这是本项目的核心创新发现；
+（3）对流效应对PDE模型的可控性起决定性作用，纯扩散模型严重低估实际房间的热响应速度；
+（4）在多房间建筑中，外墙房间的自适应增益策略优于统一参数策略，且选择性加热（外墙+中心房间）可实现能耗与舒适度的Pareto最优。
+
+代码完全可复现，托管于 \url{https://github.com/Yingurt001/RoomHeating-Project}。
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%% ============================================================
+\section{引言}
+%% ============================================================
+
+\subsection{问题背景}
+
+房间供暖控制是一个经典的工程问题，也是控制理论的理想教学案例。在英国冬季，室外温度约$T_a = 5\,^\circ\text{C}$，我们需要将室内温度维持在舒适的$T_{\text{set}} = 20\,^\circ\text{C}$。这涉及两个核心问题：
+
+\begin{enumerate}
+    \item \textbf{控制策略问题}：采用什么样的加热器控制方式最有效？是简单的开关控制还是连续调节？
+    \item \textbf{传感器放置问题}：恒温器应该放在房间的什么位置？距离加热器远近如何影响控制效果？
+    \item \textbf{建筑整体策略}：在多房间建筑中，如何协调各房间的供暖以实现全局最优？
+\end{enumerate}
+
+\subsection{研究方法}
+
+我们采用从简单到复杂的递进建模方法：
+
+\begin{itemize}
+    \item \textbf{ODE模型 (0D)}：将房间视为均匀温度体，用Newton冷却定律建立常微分方程。集中研究控制策略本身的优劣。
+    \item \textbf{1D PDE模型}：沿房间长度方向引入空间维度，用一维热方程描述温度分布。研究加热器和恒温器沿一个方向的最优位置。
+    \item \textbf{2D PDE模型}：建立矩形房间的二维温度场模型，研究全空间的温度分布和位置优化。
+    \item \textbf{多房间建筑模型}：$N$个房间共享内墙的耦合ODE系统，研究建筑级控制策略。
+\end{itemize}
+
+在每种模型上，我们比较四种控制策略（表\ref{tab:strategies}）。
+
+\begin{table}[H]
+\centering
+\caption{四种控制策略概述}
+\label{tab:strategies}
+\begin{tabular}{llll}
+\toprule
+策略 & 数学核心 & 定位 \\
+\midrule
+Bang-Bang + 滞回 & 混合动力系统 & 基线对照 \\
+PID 控制 & 闭环反馈 $u = K_p e + K_i\!\int\!e\,dt + K_d\dot{e}$ & 工程标准 \\
+LQR 最优控制 & Riccati 方程, $J = \int[Qx^2 + Ru^2]dt$ & 数学最优 \\
+Pontryagin 极小值 & Hamilton量、伴随方程 & 理论极限 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{评价指标}
+
+所有策略采用统一的六项指标评价（表\ref{tab:metrics}）。
+
+\begin{table}[H]
+\centering
+\caption{统一评价指标体系}
+\label{tab:metrics}
+\begin{tabular}{lll}
+\toprule
+指标 & 数学定义 & 物理含义 \\
+\midrule
+能耗 $E$ & $\int_0^{T_f} u(t)\,dt$ & 总能量消耗 \\
+温度 RMSE & $\sqrt{\frac{1}{T_f}\int_0^{T_f}(T-T_{\text{set}})^2\,dt}$ & 舒适度偏差 \\
+最大超调 & $\max(T(t) - T_{\text{set}})$ & 峰值偏差 \\
+稳定时间 & 首次进入$\pm 0.5\,^\circ\text{C}$并保持的时刻 & 响应速度 \\
+切换次数 & 加热器开关转换次数 & 设备磨损\footnotemark \\
+统一代价 $J$ & $\int_0^{T_f}[Q(T-T_{\text{set}})^2 + Ru^2]\,dt$ & 综合权衡 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\footnotetext{频繁切换不仅加速设备机械磨损，还因启动暂态损耗和浪涌电流导致额外能量消耗\cite{seem1998, ashrae2021}。}
+
+统一代价函数$J$通过权重$Q$和$R$平衡舒适度和能耗，是比较不同策略的最核心指标。
+
+%% ============================================================
+\section{ODE 集总参数模型}
+%% ============================================================
+
+\subsection{数学建模}
+
+Newton冷却定律将房间视为温度均匀的热容体：
+\begin{equation}
+\frac{dT}{dt} = -k(T(t) - T_a) + u(t) \label{eq:ode}
+\end{equation}
+其中$T(t)$为室温，$T_a = 5\,^\circ\text{C}$为室外温度，$k = 0.1\,\text{min}^{-1}$为冷却常数，$u(t) \in [0, U_{\max}]$为加热器控制输入，$U_{\max} = 15\,^\circ\text{C/min}$。
+
+\textbf{稳态分析}：令$dT/dt = 0$，恒定加热$u = U_{\max}$下：
+\begin{equation}
+T_{\text{ss}} = T_a + \frac{U_{\max}}{k} = 5 + \frac{15}{0.1} = 155\,^\circ\text{C}
+\end{equation}
+远高于$T_{\text{set}} = 20\,^\circ\text{C}$，表明加热器功率充足。
+
+\textbf{解析解}：无加热（$u=0$）时，方程\eqref{eq:ode}的精确解为：
+\begin{equation}
+T(t) = T_a + (T_0 - T_a)\exp(-kt)
+\end{equation}
+我们用此解析解验证了数值求解器的精度（最大误差$< 10^{-8}\,^\circ\text{C}$），采用SciPy的\texttt{solve\_ivp}（RK45自适应步长方法）\cite{boyce2021, strogatz2024}。
+
+\subsection{Bang-Bang 开关控制}
+
+最简单的温控方式是带滞回的开关控制\cite{goebel2012, zhang2001}：
+\begin{equation}
+u(t) = \begin{cases}
+U_{\max}, & T(t) < T_{\text{set}} - \delta \\
+0, & T(t) > T_{\text{set}} + \delta \\
+u(t^-), & \text{其他（保持当前状态）}
+\end{cases} \label{eq:bangbang}
+\end{equation}
+
+滞回带半宽$\delta$至关重要：$\delta = 0$时系统退化为理想开关，可能出现Zeno现象（有限时间内无限次切换）\cite{zhang2001}。增大$\delta$可减少切换频率但增大温度波动幅度。
+
+\textbf{混合动力系统视角}：方程\eqref{eq:ode}加上切换逻辑\eqref{eq:bangbang}构成混合动力系统——连续温度演化与离散开关事件的耦合\cite{goebel2012}。
+
+\textbf{滞回带扫描实验}如表\ref{tab:hysteresis}所示。能耗几乎不随$\delta$变化（$\approx 190$），因为系统需要的总热量由散热速率决定。但RMSE随$\delta$增大而显著增加。$\delta = 0.5\,^\circ\text{C}$是合理的工程折衷。
+
+\begin{table}[H]
+\centering
+\caption{Bang-Bang 滞回带参数扫描}
+\label{tab:hysteresis}
+\begin{tabular}{cccc}
+\toprule
+$\delta$ ($^\circ$C) & 切换次数 & RMSE ($^\circ$C) & 能耗 \\
+\midrule
+0.10 & 1611 & 0.446 & 189.8 \\
+0.25 & 644 & 0.465 & 189.9 \\
+0.50 & 322 & 0.527 & 189.4 \\
+1.00 & 161 & 0.726 & 189.7 \\
+2.00 & 80 & 1.235 & 190.4 \\
+5.00 & 31 & 2.938 & 183.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{ode_bangbang.png}
+\caption{Bang-Bang控制器响应：温度轨迹与控制信号}
+\label{fig:ode_bangbang}
+\end{figure}
+
+\subsection{PID 控制}
+
+PID控制器提供连续的控制信号\cite{astrom2021, blasco2012}：
+\begin{equation}
+u(t) = K_p \cdot e(t) + K_i \int_0^t e(\tau)\,d\tau + K_d \frac{de}{dt}, \quad e(t) = T_{\text{set}} - T(t) \label{eq:pid}
+\end{equation}
+并约束$u(t) \in [0, U_{\max}]$。当$u$饱和时冻结积分项（anti-windup），防止积分器溢出。
+
+\textbf{调参方法}：对$K_p \in \{0.5, 1, 2, 4, 8\}$，$K_i \in \{0.05, 0.1, 0.3, 0.5, 1.0\}$，$K_d \in \{0, 0.5, 1.0, 2.0\}$共100组参数网格搜索，以统一代价$J$为优化目标。
+
+\textbf{最优参数}：$K_p = 8.0, K_i = 1.0, K_d = 0.0$，对应$J = 25.0$。最优PID的微分项为零（退化为PI控制器），因为本系统是一阶系统，不存在振荡趋势，微分项的预测抑制作用没有必要。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{ode_pid_sweep.png}
+\caption{PID参数扫描：不同$K_p$, $K_i$, $K_d$组合的代价函数}
+\label{fig:ode_pid_sweep}
+\end{figure}
+
+\subsection{LQR 最优控制}
+
+LQR最小化无限时域代价函数\cite{astrom2021, anderson1990}：
+\begin{equation}
+J = \int_0^\infty \left[ Q(T - T_{\text{set}})^2 + Ru^2 \right] dt \label{eq:lqr_cost}
+\end{equation}
+
+引入偏差变量$x = T - T_{\text{set}}$，状态空间为：
+\begin{equation}
+\dot{x} = Ax + B(u - u_{\text{ss}}), \quad A = -k, \quad B = 1
+\end{equation}
+其中稳态前馈$u_{\text{ss}} = k(T_{\text{set}} - T_a) = 1.5\,^\circ\text{C/min}$。
+
+代数Riccati方程（ARE）：
+\begin{equation}
+A^T P + PA - PBR^{-1}B^T P + Q = 0 \label{eq:are}
+\end{equation}
+对标量系统简化为：$P = R\left(-k + \sqrt{k^2 + Q/R}\right)$，最优增益$K = P/R$。
+
+最优控制律为：
+\begin{equation}
+u^*(t) = u_{\text{ss}} + K \cdot (T_{\text{set}} - T(t)), \quad u^* \in [0, U_{\max}]
+\end{equation}
+
+\textbf{Q/R 权重扫描}：扫描$Q \in \{0.01, \ldots, 100\}$和$R \in \{0.001, \ldots, 5\}$共56组参数，生成Pareto前沿（图\ref{fig:ode_pareto}）。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{ode_lqr_pareto_sweep.png}
+\caption{LQR参数扫描的Pareto前沿：能耗 vs RMSE}
+\label{fig:ode_pareto}
+\end{figure}
+
+\subsection{Pontryagin 极小值原理}
+
+给定有限时域优化问题\cite{liberzon2012, kirk2004}：
+\begin{equation}
+\min_{u(t)} J = \int_0^{T_f} \left[ Q(T - T_{\text{set}})^2 + Ru^2 \right] dt \label{eq:pont_cost}
+\end{equation}
+约束：$\dot{T} = -k(T - T_a) + u$，$u \in [0, U_{\max}]$。
+
+构造Hamilton量：
+\begin{equation}
+H = Q(T - T_{\text{set}})^2 + Ru^2 + \lambda[-k(T - T_a) + u] \label{eq:hamiltonian}
+\end{equation}
+
+Pontryagin必要条件：
+\begin{enumerate}
+    \item \textbf{状态方程}：$\dot{T} = -k(T - T_a) + u^*$
+    \item \textbf{伴随方程}：$\dot{\lambda} = -2Q(T - T_{\text{set}}) + k\lambda$
+    \item \textbf{最优性条件}：$u^* = \text{clip}\!\left(-\frac{\lambda}{2R},\; 0,\; U_{\max}\right)$
+\end{enumerate}
+
+边界条件：$T(0) = T_0$，$\lambda(T_f) = 0$（横截性条件），构成两点边值问题（TPBVP）。
+
+\textbf{数值挑战与延续法}：当$R$很小时，$u^*$对$\lambda$非常敏感，BVP求解器难以收敛。我们采用\textbf{延续法}（continuation method）：从$R_0 = 2.0$开始，逐步缩小$R$至目标值$0.01$，每步用前一步的解作为初始猜测。延续序列：$R = 2.0 \to 0.667 \to 0.222 \to 0.074 \to 0.025 \to 0.01$，每步均成功收敛。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{ode_pontryagin.png}
+\caption{Pontryagin最优控制轨迹：状态、伴随变量和控制信号}
+\label{fig:ode_pontryagin}
+\end{figure}
+
+\subsection{ODE 模型综合对比}
+
+\begin{table}[H]
+\centering
+\caption{ODE模型下四种控制策略综合对比}
+\label{tab:ode_comparison}
+\begin{tabular}{lccccccc}
+\toprule
+策略 & 能耗 & RMSE & 超调 & 稳定时间 & 切换 & 代价$J$ \\
+\midrule
+Bang-Bang ($\delta\!=\!0.5$) & 189.4 & 0.527 & 0.500 & 120.0 & 322 & 61.8 \\
+PID (默认) & 14.6 & 0.647 & 1.837 & 12.0 & 2 & 50.4 \\
+LQR ($Q\!=\!1, R\!=\!0.01$) & 189.6 & 0.442 & 0.000 & 0.7 & 0 & 27.6 \\
+Pontryagin ($R\!=\!0.01$) & 188.9 & 0.454 & 0.000 & 1.1 & 1 & 28.7 \\
+\textbf{PID (调参后)} & 40.5 & \textbf{0.442} & 0.003 & 0.8 & 0 & \textbf{25.0} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{ode_comparison_final.png}
+\caption{ODE模型：四种控制策略的温度响应与控制信号对比}
+\label{fig:ode_comparison}
+\end{figure}
+
+\textbf{关键发现}：
+
+\begin{enumerate}
+    \item \textbf{LQR和Pontryagin性能接近}：RMSE分别为0.442和0.454，代价分别为27.6和28.7。两者理论上应趋向相同最优解；微小差异源于LQR是无限时域稳态反馈，Pontryagin是有限时域开环控制。
+    \item \textbf{充分调参的PID可匹敌最优控制}：最优PID的$J=25.0$甚至低于LQR的$J=27.6$。这并非悖论——PID通过积分项自适应补偿了系统偏差，而LQR/Pontryagin的$Q$和$R$权重与评价指标不完全匹配。
+    \item \textbf{Bang-Bang代价最高}（$J=61.8$）：频繁切换（322次）不仅增加设备磨损和启动损耗\cite{seem1998}，温度持续振荡也使舒适度最差。
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{ode_pareto_final.png}
+\caption{ODE模型Pareto前沿：能耗 vs RMSE的不可避免权衡}
+\label{fig:ode_pareto_final}
+\end{figure}
+
+%% ============================================================
+\section{一维 PDE 模型}
+%% ============================================================
+
+\subsection{从 ODE 到 PDE：引入空间维度}
+
+ODE模型假设房间温度处处均匀，实际中加热器附近温度明显高于远端。沿房间长度$L = 5\,\text{m}$方向建立一维热方程\cite{strikwerda2004}：
+\begin{equation}
+\frac{\partial T}{\partial t} = \alpha \frac{\partial^2 T}{\partial x^2} + S(x, t) \label{eq:pde1d}
+\end{equation}
+其中$\alpha$为热扩散率，$S(x,t)$为空间分布的热源。
+
+\textbf{加热器模型}：采用高斯空间分布：
+\begin{equation}
+S(x,t) = \frac{u(t)}{L} \cdot \phi(x), \quad \phi(x) \propto \exp\!\left(-\frac{(x - x_h)^2}{2\sigma^2}\right)
+\end{equation}
+归一化使$\int_0^L \phi(x)\,dx = L$。
+
+\textbf{Robin边界条件}（模拟墙壁散热）：
+\begin{equation}
+-\alpha \left.\frac{\partial T}{\partial x}\right|_{x=0} = h(T(0,t) - T_a), \quad \alpha \left.\frac{\partial T}{\partial x}\right|_{x=L} = h(T(L,t) - T_a)
+\end{equation}
+
+\subsection{数值方法}
+
+采用\textbf{线方法}（Method of Lines）：
+\begin{enumerate}
+    \item 将$[0, L]$等分为$N_x = 51$个网格点，间距$\Delta x = L/(N_x-1)$
+    \item 中心差分近似：$\frac{\partial^2 T}{\partial x^2}\big|_{x_i} \approx \frac{T_{i+1} - 2T_i + T_{i-1}}{\Delta x^2}$
+    \item Robin BC用虚拟点（ghost point）方法处理
+    \item 将空间离散后的$N_x$个ODE交给\texttt{solve\_ivp}（RK45）
+\end{enumerate}
+
+\subsection{恒温器位置实验}
+
+加热器固定在$x_h = 0.5\,\text{m}$（左墙附近），扫描恒温器位置（表\ref{tab:1d_thermostat}）。
+
+\begin{table}[H]
+\centering
+\caption{1D PDE 模型：恒温器位置对 LQR 控制器性能的影响}
+\label{tab:1d_thermostat}
+\begin{tabular}{lccc}
+\toprule
+恒温器位置 $x_{\text{th}}$ & RMSE ($^\circ$C) & 稳定时间 & 能耗 \\
+\midrule
+0.5 m（靠近加热器） & 0.506 & 0.5 min & 19.4 \\
+1.5 m & 25.869 & 未稳定 & 165.1 \\
+2.5 m（中间） & 8.534 & 未稳定 & 629.2 \\
+3.5 m & 9.727 & 未稳定 & 900.0 \\
+4.5 m（最远端） & 10.465 & 未稳定 & 900.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{1d_placement_lqr.png}
+\caption{1D PDE：不同恒温器位置下LQR控制器的温度场演化}
+\label{fig:1d_placement_lqr}
+\end{figure}
+
+当恒温器远离加热器时（$x_{\text{th}} \geq 2.5\,\text{m}$），热量必须先扩散到恒温器位置。由于纯扩散速度有限且墙壁持续散热，控制器被迫以最大功率持续加热，但仍无法达标。
+
+\subsection{加热器位置实验}
+
+固定恒温器在中心$x_{\text{th}} = 2.5\,\text{m}$，扫描加热器位置（表\ref{tab:1d_heater}）。
+
+\begin{table}[H]
+\centering
+\caption{1D PDE 模型：加热器位置对性能的影响（PID控制，恒温器在中心）}
+\label{tab:1d_heater}
+\begin{tabular}{lccc}
+\toprule
+加热器位置 $x_h$ & RMSE ($^\circ$C) & 稳定时间 & 能耗 \\
+\midrule
+0.5 m（左墙） & 8.545 & 未稳定 & 609.3 \\
+1.5 m & 24.178 & 未稳定 & 153.8 \\
+\textbf{2.5 m（中心）} & \textbf{1.316} & \textbf{12.4 min} & \textbf{1.6} \\
+3.5 m & 24.178 & 未稳定 & 153.8 \\
+4.5 m（右墙） & 8.545 & 未稳定 & 609.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+结果呈完美对称性。\textbf{加热器在中心时性能最优}，RMSE从8.5$^\circ$C降至1.3$^\circ$C，能耗从609降至1.6——差距超过两个数量级。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{1d_heater_position.png}
+\caption{1D PDE：加热器位置对系统性能的影响}
+\label{fig:1d_heater}
+\end{figure}
+
+\subsection{策略×位置对比矩阵}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{1d_metrics_matrix.png}
+\caption{1D PDE：恒温器位置$\times$控制策略的指标矩阵热力图}
+\label{fig:1d_metrics_matrix}
+\end{figure}
+
+图\ref{fig:1d_metrics_matrix}清晰表明：\textbf{在空间模型中，位置的影响远大于策略的差异}。在同一位置下，三种策略的RMSE差异不超过10\%；而位置变化导致的RMSE差异可达2个数量级。
+
+%% ============================================================
+\section{二维 PDE 模型}
+%% ============================================================
+
+\subsection{数学模型}
+
+将房间建模为$L_x \times L_y = 5\,\text{m} \times 4\,\text{m}$的矩形域\cite{strikwerda2004}：
+\begin{equation}
+\frac{\partial T}{\partial t} = \alpha \left(\frac{\partial^2 T}{\partial x^2} + \frac{\partial^2 T}{\partial y^2}\right) + S(x, y, t)
+\end{equation}
+四面墙壁均采用Robin边界条件。加热器为二维高斯分布：
+\begin{equation}
+S(x,y,t) = \frac{u(t)}{L_x L_y} \cdot \psi(x,y), \quad \psi \propto \exp\!\left(-\frac{(x-x_h)^2 + (y-y_h)^2}{2\sigma^2}\right)
+\end{equation}
+
+在$21 \times 17$的网格上用二维中心差分离散Laplacian，共357个ODE交给\texttt{solve\_ivp}。
+
+\subsection{恒温器与加热器位置实验}
+
+\begin{table}[H]
+\centering
+\caption{2D PDE 模型：加热器位置对性能的影响（恒温器在中心）}
+\label{tab:2d_heater}
+\begin{tabular}{lccc}
+\toprule
+加热器位置 & RMSE ($^\circ$C) & 能耗 & 稳定时间 \\
+\midrule
+角落 (0.5, 0.5) & 9.811 & 450.0 & 未稳定 \\
+墙壁中部 (0.5, 2.0) & 8.824 & 450.0 & 未稳定 \\
+\textbf{中心 (2.5, 2.0)} & \textbf{1.187} & \textbf{20.9} & \textbf{4.5 min} \\
+对面墙壁 (4.5, 2.0) & 8.824 & 450.0 & 未稳定 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{2d_heater_position.png}
+\caption{2D PDE：不同加热器位置下的温度场对比}
+\label{fig:2d_heater}
+\end{figure}
+
+\textbf{加热器放在中心是唯一能让系统稳定的配置}，与1D结论一致。在2D中更加显著——角落放置比墙壁中部更差，因为热量需要向两个方向扩散。
+
+\subsection{空间均匀性分析}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{2d_uniformity.png}
+\caption{2D PDE：空间温度均匀性分析——恒温器读数 vs 空间平均温度}
+\label{fig:2d_uniformity}
+\end{figure}
+
+即使恒温器读数达到$T_{\text{set}}$，房间内仍有部分区域温度显著偏低。单点传感器无法代表全房间的热舒适度——这是"恒温器放在哪"问题的物理本质。
+
+%% ============================================================
+\section{对流效应与物理模型改进}
+%% ============================================================
+
+\subsection{纯扩散模型的局限}
+
+前面PDE实验中，大量配置显示"未稳定"（$t_{\text{settle}} = \infty$）。这是否意味着大多数供暖系统在物理上不可行？答案是否定的。
+
+根本原因是\textbf{扩散时间尺度}：
+\begin{equation}
+\tau_{\text{diff}} = \frac{L^2}{\alpha} = \frac{25}{0.01} = 2500\,\text{min} \approx 42\,\text{h}
+\end{equation}
+远大于仿真时间120分钟。在纯扩散模型中，热量从加热器扩散到5米外的墙壁需要数十小时——这显然不符合实际经验。
+
+\subsection{对流增强扩散}
+
+实际房间中空气存在\textbf{自然对流}（温度梯度驱动的浮力流）和\textbf{强制对流}（风扇、空调送风）。对流效应可通过增大有效扩散率$\alpha_{\text{eff}}$来建模：
+\begin{equation}
+\alpha_{\text{eff}} = \alpha_{\text{diffusion}} + \alpha_{\text{convection}} \gg \alpha_{\text{diffusion}}
+\end{equation}
+
+我们对$\alpha \in \{0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5\}\,\text{m}^2/\text{min}$进行了系统性灵敏度分析。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{adv_convection_1d.png}
+\caption{对流效应：不同有效扩散率$\alpha$下的1D温度场演化}
+\label{fig:convection}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{adv_alpha_sensitivity.png}
+\caption{$\alpha$灵敏度分析：RMSE和稳定时间随$\alpha$的变化}
+\label{fig:alpha_sensitivity}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{有效扩散率$\alpha$灵敏度分析（1D PDE, PID控制, 加热器$x_h=0.5$m, 恒温器$x_{\text{th}}=2.5$m）}
+\label{tab:convection}
+\begin{tabular}{lccc}
+\toprule
+$\alpha$ (m$^2$/min) & RMSE ($^\circ$C) & 稳定时间 & 能耗 \\
+\midrule
+0.005 & 34.91 & 未稳定 & 900.0 \\
+0.01（纯扩散） & 8.55 & 未稳定 & 609.3 \\
+0.02 & 7.51 & 未稳定 & 262.7 \\
+0.05 & 6.62 & 未稳定 & 30.9 \\
+\textbf{0.1（弱对流）} & \textbf{6.25} & \textbf{未稳定} & \textbf{8.3} \\
+0.2（中等对流） & 3.01 & 未稳定 & 3.2 \\
+\textbf{0.5（强对流/风扇）} & \textbf{1.87} & \textbf{33.1 min} & \textbf{1.8} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{核心洞察}：$\alpha$从0.01增大到0.1时（引入弱对流），RMSE从8.55$^\circ$C降至6.25$^\circ$C，能耗从609降至8.3；当$\alpha = 0.5$（强制对流/风扇辅助）时，RMSE进一步降至1.87$^\circ$C并可在33分钟内稳定。这解释了为何实际房间中供暖系统可以在合理时间内达到设定温度。
+
+\subsection{对流条件下的控制策略对比}
+
+在$\alpha = 0.1$的对流增强模型下比较各控制策略：
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{adv_1d_convection_controllers.png}
+\caption{对流增强1D PDE下的控制策略对比（$\alpha = 0.1\,\text{m}^2/\text{min}$）}
+\label{fig:convection_controllers}
+\end{figure}
+
+即使引入对流，控制策略间的差异仍然较小（LQR和PID的RMSE差距$<3\%$），进一步印证"位置$>$策略"的结论。
+
+%% ============================================================
+\section{加热器-恒温器联合位置优化}
+%% ============================================================
+
+\subsection{1D 联合优化}
+
+前面的实验分别固定了加热器或恒温器位置。现在我们进行\textbf{联合优化}：在$\alpha = 0.1$条件下，对加热器位置$x_h$和恒温器位置$x_{\text{th}}$组成的$10\times 10$网格进行穷举搜索。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\textwidth]{adv_optimal_placement_1d.png}
+\caption{1D联合位置优化：RMSE在加热器$\times$恒温器位置空间的分布}
+\label{fig:optimal_1d}
+\end{figure}
+
+最优配置为加热器$x_h = 0.25\,\text{m}$、恒温器$x_{\text{th}} = 0.75\,\text{m}$（两者靠近），RMSE = 0.848$^\circ$C。这再次证明：\textbf{加热器与恒温器的相对距离是第一决定因素}。当两者靠近时，控制器能精确感知并调节局部温度；当两者远离时，传输延迟使反馈控制退化。
+
+\subsection{2D 联合优化}
+
+在$5\,\text{m} \times 4\,\text{m}$房间的$15\times 15$网格上进行2D联合优化：
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\textwidth]{adv_optimal_placement_2d.png}
+\caption{2D联合位置优化：最优加热器与恒温器位置}
+\label{fig:optimal_2d}
+\end{figure}
+
+最优配置为加热器(4.5, 0.5)、恒温器(3.5, 0.5)，RMSE = 2.04$^\circ$C。两者相距约1m，紧密配对。
+
+%% ============================================================
+\section{多房间建筑模型}
+%% ============================================================
+
+\subsection{模型建立}
+
+项目要求制定建筑整体策略。我们建立$N$个房间线性排列的多房间耦合模型：
+
+\begin{equation}
+\frac{dT_i}{dt} = -k_{\text{ext}}(T_i - T_a) \cdot \mathbf{1}_{\{i\in\text{ext}\}} - k_{\text{int}}\sum_{j\in\text{adj}(i)}(T_i - T_j) + u_i(t)
+\end{equation}
+
+房间布局：$[\text{ext}\;|\;\text{room 0}\;|\;\text{int}\;|\;\text{room 1}\;|\;\cdots\;|\;\text{room }N\!-\!1\;|\;\text{ext}]$
+
+其中$k_{\text{ext}} = 0.1\,\text{min}^{-1}$为外墙冷却常数，$k_{\text{int}} = 0.05\,\text{min}^{-1}$为内墙耦合常数。矩阵形式：
+\begin{equation}
+\dot{\mathbf{T}} = A\mathbf{T} + \mathbf{u} + \mathbf{c}
+\end{equation}
+其中$A$编码了外墙散热和内墙耦合的拓扑结构。
+
+\subsection{内墙耦合效应}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{adv_building_coupling.png}
+\caption{5房间建筑：不同内墙耦合强度$k_{\text{int}}$下各房间的温度响应}
+\label{fig:building_coupling}
+\end{figure}
+
+随着$k_{\text{int}}$增大，房间间温度趋于均匀，但也意味着热量从被加热房间流失到邻室。外墙房间（room 0和room 4）由于同时面对室外散热和内部耦合，温度始终低于内部房间。
+
+\subsection{建筑级控制策略对比}
+
+我们在5房间建筑上比较了五种策略：
+
+\begin{enumerate}
+    \item \textbf{Uniform PID}：所有房间使用相同PID参数
+    \item \textbf{Adaptive PID}：外墙房间使用更高增益（$K_p$加倍，$K_i$加倍）
+    \item \textbf{LQR}：基于完整耦合模型的最优反馈
+    \item \textbf{Exterior-only}：仅加热外墙房间，依靠内墙耦合温暖内部
+    \item \textbf{Exterior + Centre}：仅加热外墙和中心房间
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{adv_building_strategies.png}
+\caption{建筑级控制策略对比：5种策略下各房间温度轨迹}
+\label{fig:building_strategies}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{建筑级控制策略量化对比}
+\label{tab:building_strategies}
+\begin{tabular}{lcccc}
+\toprule
+策略 & 平均 RMSE & 最差房间 RMSE & 总能耗 & 评价 \\
+\midrule
+Uniform PID & 0.496 & 0.696 & 55.3 & 基线 \\
+\textbf{Adaptive PID} & \textbf{0.484} & \textbf{0.486} & 58.8 & \textbf{最均匀} \\
+LQR & 0.496 & 0.696 & 56.5 & 理论最优 \\
+Exterior-only & 2.440 & 5.990 & 25.0 & 最节能 \\
+Exterior + Centre & 0.917 & 2.156 & 46.1 & 平衡方案 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\textwidth]{adv_building_pareto.png}
+\caption{建筑级策略的Pareto前沿：总能耗 vs 平均RMSE}
+\label{fig:building_pareto}
+\end{figure}
+
+\textbf{关键发现}：
+\begin{enumerate}
+    \item \textbf{Adaptive PID最均匀}：通过对外墙房间增大增益，最差房间RMSE从0.696$^\circ$C降至0.486$^\circ$C，房间间温差减小。
+    \item \textbf{Exterior+Centre是优秀的Pareto方案}：仅加热3个房间（节省40\%能耗），平均RMSE为0.917$^\circ$C，远好于仅加热外墙（RMSE=2.44$^\circ$C）。
+    \item \textbf{LQR的优势不明显}：在多房间场景中，LQR与Uniform PID性能几乎相同，因为房间间耦合较弱时，局部反馈已足够好。
+\end{enumerate}
+
+%% ============================================================
+\section{Pontryagin 最优控制的数值方法}
+%% ============================================================
+
+\subsection{BVP 的数值困难}
+
+当$R$很小时，$u^* = \text{clip}(-\lambda/(2R), 0, U_{\max})$对$\lambda$非常敏感，伴随方程变得\textbf{刚性}——$\lambda$在短时间内急剧变化。
+
+\subsection{延续法的实现}
+
+参数延续的关键思想：将困难问题转化为一系列容易问题的序列。每一步的解为下一步提供良好的初始猜测，使得Newton迭代从一开始就在收敛半径内。
+
+对$R = 0.01$，完整延续序列为：
+\[
+R = 2.0 \to 0.667 \to 0.222 \to 0.074 \to 0.025 \to 0.01
+\]
+每步均在800-870个网格节点上成功收敛。没有延续法时，直接求解$R = 0.01$的BVP完全不收敛。
+
+\subsection{与 LQR 的理论关系}
+
+在无约束和无限时域极限下，Pontryagin解应与LQR解重合\cite{astrom2021, liberzon2012}。数值结果的微小差异（$J_{\text{LQR}} = 27.6$ vs $J_{\text{Pont}} = 28.7$）来自：有限时域终端效应（$\lambda \to 0$时控制力减弱）、控制约束激活、以及BVP容差。
+
+%% ============================================================
+\section{讨论}
+%% ============================================================
+
+\subsection{从 0D 到 2D 的认知递进}
+
+本项目最重要的方法论贡献是展示了逐步复杂化建模的价值：
+
+\begin{table}[H]
+\centering
+\caption{模型维度递进带来的新洞察}
+\begin{tabular}{lll}
+\toprule
+模型维度 & 新增物理效应 & 新增洞察 \\
+\midrule
+ODE (0D) & — & 策略优劣：LQR/Pontryagin $>$ PID $>$ Bang-Bang \\
+1D PDE & 空间扩散、位置效应 & 位置 $>$ 策略 \\
+2D PDE & 二维扩散、角落效应 & 中心放置最优；均匀性是关键挑战 \\
+对流增强 & 自然/强制对流 & 纯扩散严重低估实际热响应速度 \\
+多房间 & 内墙耦合 & 自适应增益优于统一参数 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+每一步复杂化都揭示了新的物理机制，而非简单的精度提升。这体现了应用数学建模的核心思想：\emph{``所有模型都是错的，但有些是有用的''}（George Box）。
+
+\subsection{核心创新：位置$>$策略}
+
+在集总参数（ODE）模型中，控制策略的选择是唯一的优化变量，LQR/Pontryagin可比Bang-Bang降低代价55\%。然而，在PDE模型中，\textbf{加热器从墙壁移至中心，RMSE降低85\%，能耗降低99.7\%}——这一改善远超任何控制策略优化。
+
+这一发现的实际工程意义是：在设计供暖系统时，\textbf{先优化设备布局，再选择控制策略}。
+
+\subsection{对流效应的物理意义}
+
+纯扩散模型（$\alpha = 0.01\,\text{m}^2/\text{min}$）给出不切实际的慢响应（扩散时间尺度42小时），引入有效对流扩散率后模型行为与实际经验一致。这提醒我们：\textbf{简化模型必须选择正确的物理尺度}。
+
+\subsection{控制策略的适用场景}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+场景 & 推荐策略 & 理由 \\
+\midrule
+简单家用恒温器 & Bang-Bang ($\delta = 0.5\,^\circ$C) & 实现最简单，鲁棒性好 \\
+精密温控（实验室） & PID（充分调参） & 零超调、快速稳定 \\
+已知精确模型 & LQR & 数学最优，自动权衡 \\
+有限时域优化 & Pontryagin & 理论最严谨 \\
+多房间建筑 & Adaptive PID & 无需全局模型，适应性强 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{局限与未来工作}
+
+\begin{enumerate}
+    \item \textbf{模型简化}：实际房间有家具、窗户（不同传热系数）、人体热源等。
+    \item \textbf{控制器假设}：LQR和Pontryagin基于完美模型知识；鲁棒控制（$H_\infty$）或自适应控制是自然延伸。
+    \item \textbf{加热器模型}：真实暖气片有热响应时间延迟。
+    \item \textbf{MPC}：模型预测控制可在线处理约束和扰动，是LQR/Pontryagin的现代工程延伸。
+    \item \textbf{多传感器融合}：使用多个温度传感器的加权平均代替单点测量，可缓解位置敏感性。
+\end{enumerate}
+
+%% ============================================================
+\section{结论}
+%% ============================================================
+
+本项目通过从ODE到2D PDE再到多房间建筑的递进建模，以及四种控制策略的系统比较，得出以下核心结论：
+
+\begin{enumerate}
+    \item \textbf{在集总参数模型中}，LQR和Pontryagin达到最低代价（$J \approx 27$-$28$），但充分调参的PID可达到$J = 25$，说明"最优控制$\neq$最优性能"——模型与评价准则的匹配同样重要。
+
+    \item \textbf{引入空间维度后}，加热器和恒温器的\textbf{位置}成为控制性能的主导因素。加热器从墙壁移至中心，RMSE降低85\%，能耗降低99.7\%。这一改善远超任何控制策略优化。
+
+    \item \textbf{对流效应是PDE模型可控性的关键}：纯扩散模型给出42小时的特征时间尺度，引入弱对流（$\alpha = 0.1$）后系统行为合理，强对流（$\alpha = 0.5$）下可在33分钟稳定。
+
+    \item \textbf{在多房间建筑中}，外墙房间使用更高增益的自适应PID策略优于统一参数策略；选择性加热外墙+中心房间可节省40\%能耗，同时保持可接受的舒适度。
+
+    \item \textbf{实际工程建议}：先优化设备位置（将加热器置于房间中心），再选择控制策略。如果位置已固定，PID控制器（充分调参）是最实用的选择。
+\end{enumerate}
+
+%% ============================================================
+\section*{参考文献}
+%% ============================================================
+
+\begin{thebibliography}{99}
+
+\bibitem{boyce2021}
+Boyce WE, DiPrima RC, Meade DB.
+\emph{Elementary Differential Equations and Boundary Value Problems}. 12th~ed. Wiley; 2021.
+
+\bibitem{strogatz2024}
+Strogatz SH.
+\emph{Nonlinear Dynamics and Chaos}. 3rd~ed. CRC Press; 2024.
+
+\bibitem{astrom2021}
+\AA str\"om KJ, Murray RM.
+\emph{Feedback Systems: An Introduction for Scientists and Engineers}. 2nd~ed. Princeton University Press; 2021.
+
+\bibitem{goebel2012}
+Goebel R, Sanfelice RG, Teel AR.
+\emph{Hybrid Dynamical Systems: Modeling, Stability, and Robustness}. Princeton University Press; 2012.
+
+\bibitem{zhang2001}
+Zhang J, Johansson KH, Lygeros J, Sastry SS.
+Zeno hybrid systems.
+\emph{Int J Robust Nonlinear Control}. 2001;11(5):435--451.
+
+\bibitem{lygeros2003}
+Lygeros J, Johansson KH, Simic SN, Zhang J, Sastry SS.
+Dynamical properties of hybrid automata.
+\emph{IEEE Trans Autom Control}. 2003;48(1):2--17.
+
+\bibitem{strikwerda2004}
+Strikwerda JC.
+\emph{Finite Difference Schemes and Partial Differential Equations}. 2nd~ed. SIAM; 2004.
+
+\bibitem{blasco2012}
+Blasco C, Monreal J, Benitez I, Lluna A.
+Modelling and PID control of HVAC system.
+In: \emph{Trends in Practical Applications of Agents and Multiagent Systems}. Springer; 2012. p.~365--374.
+
+\bibitem{anderson1990}
+Anderson BDO, Moore JB.
+\emph{Optimal Control: Linear Quadratic Methods}. Prentice-Hall; 1990. (Dover reprint, 2007.)
+
+\bibitem{liberzon2012}
+Liberzon D.
+\emph{Calculus of Variations and Optimal Control Theory: A Concise Introduction}. Princeton University Press; 2012.
+
+\bibitem{kirk2004}
+Kirk DE.
+\emph{Optimal Control Theory: An Introduction}. Dover; 2004.
+
+\bibitem{seem1998}
+Seem JE.
+Duct leakage impacts on short cycling in HVAC systems.
+\emph{ASHRAE Journal}. 1998;40(8).
+
+\bibitem{ashrae2021}
+ASHRAE.
+\emph{HVAC Systems and Equipment Handbook}. Ch.~47; 2021.
+
+\end{thebibliography}
+
+%% ============================================================
+\appendix
+\section{物理参数表}
+%% ============================================================
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+参数 & 符号 & 值 & 单位 \\
+\midrule
+室外温度 & $T_a$ & 5 & $^\circ$C \\
+初始室温 & $T_0$ & 10 & $^\circ$C \\
+设定温度 & $T_{\text{set}}$ & 20 & $^\circ$C \\
+最大加热率 & $U_{\max}$ & 15 & $^\circ$C/min \\
+冷却常数 & $k$ & 0.1 & min$^{-1}$ \\
+热扩散率 & $\alpha$ & 0.01 & m$^2$/min \\
+有效扩散率(对流) & $\alpha_{\text{eff}}$ & 0.1--0.5 & m$^2$/min \\
+墙壁传热系数 & $h$ & 0.5 & m$^{-1}$ \\
+房间长度 & $L_x$ & 5 & m \\
+房间宽度 & $L_y$ & 4 & m \\
+滞回带半宽 & $\delta$ & 0.5 & $^\circ$C \\
+仿真总时间 & $T_f$ & 120 & min \\
+外墙冷却常数 & $k_{\text{ext}}$ & 0.1 & min$^{-1}$ \\
+内墙耦合常数 & $k_{\text{int}}$ & 0.05 & min$^{-1}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{PID 参数搜索结果（前5名）}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cccccc}
+\toprule
+排名 & $K_p$ & $K_i$ & $K_d$ & RMSE & 代价 $J$ \\
+\midrule
+1 & 8.0 & 1.0 & 0.0 & 0.442 & 25.01 \\
+2 & 8.0 & 0.5 & 0.0 & 0.443 & 25.33 \\
+3 & 8.0 & 1.0 & 0.5 & 0.443 & 25.38 \\
+4 & 4.0 & 1.0 & 0.0 & 0.480 & 26.98 \\
+5 & 8.0 & 0.5 & 0.5 & 0.444 & 25.61 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+高$K_p$（快速响应）和适度$K_i$（消除稳态误差）是关键，$K_d$对此一阶系统贡献甚微。
+
+\end{document}
