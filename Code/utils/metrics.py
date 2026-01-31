@@ -8,9 +8,13 @@ enabling consistent comparison across strategies and models.
 import numpy as np
 
 
-def energy_consumption(t, u):
+def energy_consumption(t, u, heater=None, switching_cost=0.0):
     """
-    Total energy consumption: E = integral u(t) dt.
+    Total energy consumption: E = integral u(t) dt + c_s * N_switches.
+
+    The switching cost models start-up transient losses (inrush current,
+    heat exchanger warm-up) that occur each time the heater cycles on/off.
+    See: Seem (1998), ASHRAE Handbook Ch.47.
 
     Parameters
     ----------
@@ -18,13 +22,21 @@ def energy_consumption(t, u):
         Time array.
     u : ndarray
         Control input array (heater power at each time step).
+    heater : ndarray, optional
+        Binary heater state for counting switches.
+    switching_cost : float
+        Energy penalty per switch event (default 0 for backward compat).
 
     Returns
     -------
     E : float
-        Total energy consumed.
+        Total energy consumed (heating + switching losses).
     """
-    return np.trapz(u, t)
+    E = np.trapz(u, t)
+    if switching_cost > 0 and heater is not None:
+        n_sw = int(np.sum(np.abs(np.diff(heater)) > 0.5))
+        E += switching_cost * n_sw
+    return E
 
 
 def temperature_rmse(t, T, T_set):
@@ -150,7 +162,8 @@ def unified_cost(t, T, u, T_set, Q=1.0, R=0.01):
     return np.trapz(integrand, t)
 
 
-def compute_all_metrics(t, T, u, T_set, heater=None, Q=1.0, R=0.01):
+def compute_all_metrics(t, T, u, T_set, heater=None, Q=1.0, R=0.01,
+                        switching_cost=0.0):
     """
     Compute all metrics in one call.
 
@@ -169,6 +182,8 @@ def compute_all_metrics(t, T, u, T_set, heater=None, Q=1.0, R=0.01):
         If None, switches are estimated from u.
     Q, R : float
         Cost weights.
+    switching_cost : float
+        Energy penalty per heater switch event (default 0).
 
     Returns
     -------
@@ -176,10 +191,10 @@ def compute_all_metrics(t, T, u, T_set, heater=None, Q=1.0, R=0.01):
         Dictionary of all computed metrics.
     """
     if heater is None:
-        heater = (u > 0.01 * np.max(u)).astype(float)
+        heater = (u > 0.01 * max(np.max(u), 1e-10)).astype(float)
 
     return {
-        'energy': energy_consumption(t, u),
+        'energy': energy_consumption(t, u, heater, switching_cost),
         'rmse': temperature_rmse(t, T, T_set),
         'max_overshoot': max_overshoot(T, T_set),
         'settling_time': settling_time(t, T, T_set),

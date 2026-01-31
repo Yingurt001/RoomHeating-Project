@@ -686,6 +686,115 @@ R = 2.0 \to 0.667 \to 0.222 \to 0.074 \to 0.025 \to 0.01
 在无约束和无限时域极限下，Pontryagin解应与LQR解重合\cite{astrom2021, liberzon2012}。数值结果的微小差异（$J_{\text{LQR}} = 27.6$ vs $J_{\text{Pont}} = 28.7$）来自：有限时域终端效应（$\lambda \to 0$时控制力减弱）、控制约束激活、以及BVP容差。
 
 %% ============================================================
+\section{创新方案：解决恒温器位置敏感性问题}
+%% ============================================================
+
+前面的实验揭示了一个核心问题：单点恒温器远离加热器时，控制性能急剧恶化。但这并不意味着恒温器必须放在加热器旁边——问题的根源是\textbf{单点测量无法代表空间平均温度}。本节提出四种创新解决方案。
+
+\subsection{方案概述}
+
+\begin{enumerate}
+    \item \textbf{设定值补偿}：根据模型预测的稳态温度梯度，调整恒温器处的本地设定值。如果恒温器在加热器附近（读数偏高），则降低本地目标；反之则升高。
+    \item \textbf{观测器反馈}：用稳态模型估算"恒温器读数$\to$空间平均温度"的偏差，作为单传感器的模型补偿项。PID控制器作用于估算的平均温度而非原始读数。
+    \item \textbf{双传感器加权}：在房间两端各放一个温度传感器，取加权平均作为反馈信号：$T_{\text{fb}} = w \cdot T_{\text{near}} + (1-w) \cdot T_{\text{far}}$。无需物理模型。
+    \item \textbf{脉冲加热}：交替进行"加热期"（PID正常工作）和"扩散期"（加热器关闭，让热量均匀化）。在扩散期读取恒温器，获得更具代表性的温度。
+\end{enumerate}
+
+\subsection{实验结果}
+
+在对流增强1D PDE模型（$\alpha_{\text{eff}} = 0.1\,\text{m}^2/\text{min}$）上，加热器固定于$x_h = 0.5\,\text{m}$，比较各方案在不同恒温器位置下的性能。评价指标为\textbf{空间平均温度的RMSE}（而非恒温器本地读数）。
+
+\begin{table}[H]
+\centering
+\caption{创新方案 vs 基线PID：不同恒温器位置下的空间平均RMSE ($^\circ$C)}
+\label{tab:solutions}
+\begin{tabular}{lccccc}
+\toprule
+方案 & $x_{\text{th}}=0.5$ & $1.5$ & $2.5$ & $3.5$ & $4.5$ \\
+\midrule
+基线 PID & 4.27 & 3.25 & 6.31 & 16.68 & 29.66 \\
+设定值补偿 & 9.42 & 6.49 & 6.03 & 20.61 & 38.72 \\
+观测器反馈 & \textbf{2.15} & \textbf{1.23} & 6.74 & 13.08 & 18.66 \\
+\textbf{双传感器} & 1.96 & 1.96 & \textbf{1.96} & \textbf{1.96} & \textbf{1.96} \\
+脉冲加热 & 2.56 & 2.42 & 5.16 & 13.32 & 22.60 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{placement_solutions_comparison.png}
+\caption{创新方案对比：空间平均RMSE和能耗随恒温器位置的变化}
+\label{fig:solutions_comparison}
+\end{figure}
+
+\subsection{核心创新：双传感器加权反馈}
+
+双传感器方案的最突出优势是\textbf{位置无关性}——无论名义恒温器在哪，RMSE恒为$1.96\,^\circ\text{C}$。这是因为反馈信号来自两个固定位置（近端$x=0.5\,\text{m}$和远端$x=4.5\,\text{m}$）的加权平均，直接近似了空间平均温度。
+
+\textbf{权重优化}：扫描$w_{\text{near}} \in [0, 1]$，最优权重为$w^* = 0.45$（近乎等权），对应最低RMSE = $1.60\,^\circ\text{C}$。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{placement_dual_sensor_optim.png}
+\caption{双传感器权重优化：RMSE随近端传感器权重的变化及能耗-RMSE Pareto}
+\label{fig:dual_sensor_optim}
+\end{figure}
+
+\textbf{传感器位置优化}：
+
+\begin{table}[H]
+\centering
+\caption{双传感器布局方案对比}
+\label{tab:dual_sensor_placement}
+\begin{tabular}{lcc}
+\toprule
+传感器位置 & RMSE ($^\circ$C) & 能耗 \\
+\midrule
+近+远 (0.5m, 4.5m) & 1.96 & 80.3 \\
+近+中 (0.5m, 2.5m) & 2.76 & 116.0 \\
+\textbf{四分位 (1.25m, 3.75m)} & \textbf{1.27} & 174.1 \\
+三分位 (1.67m, 3.33m) & 3.99 & 181.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+四分位布局（$x = L/4$和$x = 3L/4$）达到最低RMSE = $1.27\,^\circ\text{C}$。这与数值积分中的\textbf{高斯求积}思想一致：两点高斯求积的最优节点恰好在区间的$1/4$和$3/4$处，能精确积分三次多项式——这里的温度稳态分布近似为二次函数，两个四分位传感器恰好能最佳近似其空间平均值。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{placement_solutions_profiles.png}
+\caption{各方案在$t=60\,\text{min}$时的空间温度分布}
+\label{fig:solutions_profiles}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{placement_solutions_improvement.png}
+\caption{各创新方案相对于基线PID的RMSE改善百分比}
+\label{fig:solutions_improvement}
+\end{figure}
+
+\subsection{方案比较总结}
+
+\begin{table}[H]
+\centering
+\caption{四种创新方案的特性对比}
+\begin{tabular}{lcccc}
+\toprule
+方案 & 需要模型？ & 额外硬件？ & 位置鲁棒性 & 最佳适用场景 \\
+\midrule
+设定值补偿 & 是 & 否 & 差 & 恒温器在加热器附近 \\
+观测器反馈 & 是 & 否 & 中 & 已知模型参数 \\
+\textbf{双传感器} & \textbf{否} & 1个传感器 & \textbf{优} & \textbf{通用场景} \\
+脉冲加热 & 否 & 否 & 中 & 无法加装传感器 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+双传感器方案以最低的复杂度（仅需多加一个廉价温度传感器）实现了最优且位置无关的性能，是本项目提出的\textbf{核心创新方案}。
+
+%% ============================================================
 \section{讨论}
 %% ============================================================
 
@@ -763,7 +872,9 @@ ODE (0D) & — & 策略优劣：LQR/Pontryagin $>$ PID $>$ Bang-Bang \\
 
     \item \textbf{在多房间建筑中}，外墙房间使用更高增益的自适应PID策略优于统一参数策略；选择性加热外墙+中心房间可节省40\%能耗，同时保持可接受的舒适度。
 
-    \item \textbf{实际工程建议}：先优化设备位置（将加热器置于房间中心），再选择控制策略。如果位置已固定，PID控制器（充分调参）是最实用的选择。
+    \item \textbf{双传感器加权反馈消除位置敏感性}：在房间四分位点（$L/4$和$3L/4$）各放一个传感器，取近等权平均作为反馈信号，可将RMSE降至$1.27\,^\circ\text{C}$且\textbf{完全不依赖传感器位置}。这一方案无需物理模型，仅需增加一个廉价传感器，是本项目提出的核心创新。其最优性与高斯求积理论一致：两点高斯节点恰在$[0,L]$的四分位处。
+
+    \item \textbf{实际工程建议}：（a）将加热器置于房间中心；（b）使用两个传感器（四分位布局）替代单点恒温器；（c）在此基础上，PID控制器（充分调参）即可达到接近最优的性能。
 \end{enumerate}
 
 %% ============================================================
