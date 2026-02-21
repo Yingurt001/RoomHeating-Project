@@ -33,7 +33,7 @@ HYSTERESIS_BAND = 0.5  # Half-width of dead band (deg C)
 
 # --- Simulation ---
 T_END = 300.0          # Total simulation time (minutes)
-DT = 0.01              # Time step (minutes)
+DT = 0.1              # Max time step for solver (minutes), RK45 adapts internally
 
 # --- PDE discretisation ---
 NX = 51                # Number of spatial grid points in x
