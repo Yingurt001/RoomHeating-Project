@@ -54,6 +54,7 @@ def make_window_east_south():
     h_south = np.full(NX, H_WALL)
     h_east = np.full(NY, H_WALL)
     x = np.linspace(0, 5, NX)
+    y = np.linspace(0, 5, NY)
     h_south[(x >= 0.5) & (x <= 3.5)] = 2.5 # window area
     h_east[(y >= 1.0) & (y <= 3.0)] = 2.5
     wall_h = {
