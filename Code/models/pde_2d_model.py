@@ -3,10 +3,16 @@
 
     dT/dt = alpha * (d^2T/dx^2 + d^2T/dy^2) + S(x, y, t)
 
-Boundary Conditions (Robin):
-    All four walls lose heat to the outside:
-    -alpha * dT/dn = h * (T - T_a)
-    where n is the outward normal direction.
+Boundary Conditions (Robin, per-wall segmented):
+    -alpha * dT/dn = h(s) * (T - T_a)
+    where n is the outward normal and h(s) can vary along each wall.
+
+Supports:
+    - Segmented h arrays: different h per grid point on each wall
+      (windows, doors, insulated segments)
+    - Domain masking: irregular room shapes (e.g. L-shaped)
+    - Time-varying BC: callback to update h arrays each timestep
+      (e.g. door opening/closing)
 
 Method: Method of Lines with 2D finite differences, vectorised.
 
@@ -33,16 +39,14 @@ class HeatEquation2D:
 
     Parameters
     ----------
-    Lx : float
-        Room length in x direction (m).
-    Ly : float
-        Room width in y direction (m).
+    Lx, Ly : float
+        Room dimensions (m).
     nx, ny : int
         Number of grid points in x, y.
     alpha : float
         Thermal diffusivity (m^2/min).
     h_wall : float
-        Wall heat transfer coefficient (1/m).
+        Default wall heat transfer coefficient (1/m).
     T_a : float
         Ambient temperature.
     T0 : float or ndarray
@@ -53,12 +57,21 @@ class HeatEquation2D:
         Heater influence radius (m).
     thermostat_pos : tuple (x, y)
         Position of thermostat sensor.
+    wall_h : dict, optional
+        Per-wall h arrays: {'south': array(nx), 'north': array(nx),
+        'west': array(ny), 'east': array(ny)}.
+        Missing keys default to np.full(n, h_wall).
+    domain_mask : ndarray of bool (nx, ny), optional
+        True = active region, False = excluded (e.g. L-shape cutout).
+    h_updater : callable(t, model), optional
+        Called at each RHS evaluation to update h arrays (time-varying BC).
     """
 
     def __init__(self, Lx=ROOM_LENGTH, Ly=ROOM_WIDTH, nx=NX, ny=NY,
                  alpha=ALPHA, h_wall=H_WALL, T_a=T_AMBIENT, T0=T_INITIAL,
                  heater_pos=(0.5, 2.0), heater_radius=0.5,
-                 thermostat_pos=(2.5, 2.0)):
+                 thermostat_pos=(2.5, 2.0),
+                 wall_h=None, domain_mask=None, h_updater=None):
         self.Lx = Lx
         self.Ly = Ly
         self.nx = nx
@@ -71,6 +84,27 @@ class HeatEquation2D:
         self.x = np.linspace(0, Lx, nx)
         self.y = np.linspace(0, Ly, ny)
         self.X, self.Y = np.meshgrid(self.x, self.y, indexing='ij')
+
+        # Per-wall h arrays (segmented Robin BC)
+        if wall_h is None:
+            self.h_south = np.full(nx, h_wall)
+            self.h_north = np.full(nx, h_wall)
+            self.h_west = np.full(ny, h_wall)
+            self.h_east = np.full(ny, h_wall)
+        else:
+            self.h_south = wall_h.get('south', np.full(nx, h_wall))
+            self.h_north = wall_h.get('north', np.full(nx, h_wall))
+            self.h_west = wall_h.get('west', np.full(ny, h_wall))
+            self.h_east = wall_h.get('east', np.full(ny, h_wall))
+
+        # Domain mask (for irregular shapes)
+        if domain_mask is not None:
+            self.mask = domain_mask
+        else:
+            self.mask = np.ones((nx, ny), dtype=bool)
+
+        # Time-varying BC callback
+        self._h_updater = h_updater
 
         # Initial condition
         if np.isscalar(T0):
@@ -109,10 +143,13 @@ class HeatEquation2D:
 
         T_flat is of shape (nx*ny,), reshaped to (nx, ny).
         """
+        # Time-varying BC: update h arrays if callback is set
+        if self._h_updater is not None:
+            self._h_updater(t, self)
+
         T = T_flat.reshape(self.nx, self.ny)
         dx, dy = self.dx, self.dy
         alpha = self.alpha
-        nx, ny = self.nx, self.ny
 
         T_therm = self.get_thermostat_temperature(T)
         u = u_func(t, T_therm)
@@ -125,48 +162,54 @@ class HeatEquation2D:
             (T[1:-1, 2:] - 2*T[1:-1, 1:-1] + T[1:-1, :-2]) / dy**2
         )
 
-        # Robin BC: ghost-point approach for all four walls
+        # Robin BC: ghost-point approach with per-wall h arrays
 
-        # Left wall (x=0), interior y
+        # West wall (x=0), interior y
         dTdt[0, 1:-1] = alpha * (
-            (2*T[1, 1:-1] - 2*T[0, 1:-1] - 2*dx*self.h_wall*(T[0, 1:-1] - self.T_a)) / dx**2 +
+            (2*T[1, 1:-1] - 2*T[0, 1:-1] - 2*dx*self.h_west[1:-1]*(T[0, 1:-1] - self.T_a)) / dx**2 +
             (T[0, 2:] - 2*T[0, 1:-1] + T[0, :-2]) / dy**2
         )
 
-        # Right wall (x=Lx), interior y
+        # East wall (x=Lx), interior y
         dTdt[-1, 1:-1] = alpha * (
-            (2*T[-2, 1:-1] - 2*T[-1, 1:-1] - 2*dx*self.h_wall*(T[-1, 1:-1] - self.T_a)) / dx**2 +
+            (2*T[-2, 1:-1] - 2*T[-1, 1:-1] - 2*dx*self.h_east[1:-1]*(T[-1, 1:-1] - self.T_a)) / dx**2 +
             (T[-1, 2:] - 2*T[-1, 1:-1] + T[-1, :-2]) / dy**2
         )
 
-        # Bottom wall (y=0), interior x
+        # South wall (y=0), interior x
         dTdt[1:-1, 0] = alpha * (
             (T[2:, 0] - 2*T[1:-1, 0] + T[:-2, 0]) / dx**2 +
-            (2*T[1:-1, 1] - 2*T[1:-1, 0] - 2*dy*self.h_wall*(T[1:-1, 0] - self.T_a)) / dy**2
+            (2*T[1:-1, 1] - 2*T[1:-1, 0] - 2*dy*self.h_south[1:-1]*(T[1:-1, 0] - self.T_a)) / dy**2
         )
 
-        # Top wall (y=Ly), interior x
+        # North wall (y=Ly), interior x
         dTdt[1:-1, -1] = alpha * (
             (T[2:, -1] - 2*T[1:-1, -1] + T[:-2, -1]) / dx**2 +
-            (2*T[1:-1, -2] - 2*T[1:-1, -1] - 2*dy*self.h_wall*(T[1:-1, -1] - self.T_a)) / dy**2
+            (2*T[1:-1, -2] - 2*T[1:-1, -1] - 2*dy*self.h_north[1:-1]*(T[1:-1, -1] - self.T_a)) / dy**2
         )
 
         # Corners: use both Robin BCs
+        # h_x = west or east, h_y = south or north
         for (ix, iy) in [(0, 0), (0, -1), (-1, 0), (-1, -1)]:
-            # x-direction ghost
+            # x-direction: west (ix=0) or east (ix=-1)
+            h_x = self.h_west[iy] if ix == 0 else self.h_east[iy]
             if ix == 0:
-                d2x = (2*T[1, iy] - 2*T[0, iy] - 2*dx*self.h_wall*(T[0, iy] - self.T_a)) / dx**2
+                d2x = (2*T[1, iy] - 2*T[0, iy] - 2*dx*h_x*(T[0, iy] - self.T_a)) / dx**2
             else:
-                d2x = (2*T[-2, iy] - 2*T[-1, iy] - 2*dx*self.h_wall*(T[-1, iy] - self.T_a)) / dx**2
-            # y-direction ghost
+                d2x = (2*T[-2, iy] - 2*T[-1, iy] - 2*dx*h_x*(T[-1, iy] - self.T_a)) / dx**2
+            # y-direction: south (iy=0) or north (iy=-1)
+            h_y = self.h_south[ix] if iy == 0 else self.h_north[ix]
             if iy == 0:
-                d2y = (2*T[ix, 1] - 2*T[ix, 0] - 2*dy*self.h_wall*(T[ix, 0] - self.T_a)) / dy**2
+                d2y = (2*T[ix, 1] - 2*T[ix, 0] - 2*dy*h_y*(T[ix, 0] - self.T_a)) / dy**2
             else:
-                d2y = (2*T[ix, -2] - 2*T[ix, -1] - 2*dy*self.h_wall*(T[ix, -1] - self.T_a)) / dy**2
+                d2y = (2*T[ix, -2] - 2*T[ix, -1] - 2*dy*h_y*(T[ix, -1] - self.T_a)) / dy**2
             dTdt[ix, iy] = alpha * (d2x + d2y)
 
         # Add heater source
         dTdt += u * self._heater_profile / (self.Lx * self.Ly)
+
+        # Domain mask: freeze excluded regions
+        dTdt[~self.mask] = 0.0
 
         return dTdt.ravel()
 

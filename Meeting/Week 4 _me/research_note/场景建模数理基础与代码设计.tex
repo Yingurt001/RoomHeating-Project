@@ -1,0 +1,545 @@
+\documentclass[11pt,a4paper]{article}
+
+% 禁用 PDF tagging
+\ExplSyntaxOn
+\bool_if_exist:NT \g__tag_active_bool { \bool_gset_false:N \g__tag_active_bool }
+\bool_if_exist:NT \g__tag_active_struct_dest_bool { \bool_gset_false:N \g__tag_active_struct_dest_bool }
+\ExplSyntaxOff
+
+\usepackage[UTF8]{ctex}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{geometry}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,decorations.pathreplacing,calc,patterns}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{makecell}
+\usepackage{multirow}
+\usepackage{listings}
+
+\usepackage[backend=biber, style=authoryear, maxnames=2, natbib=true]{biblatex}
+\addbibresource{references.bib}
+
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue!60!black, citecolor=green!50!black, urlcolor=cyan!60!black}
+
+\geometry{left=2.2cm, right=2.2cm, top=2.2cm, bottom=2.2cm}
+
+% 颜色定义
+\definecolor{defcolor}{RGB}{0,100,150}
+\definecolor{thmcolor}{RGB}{150,50,0}
+\definecolor{keycolor}{RGB}{200,0,50}
+\definecolor{notecolor}{RGB}{0,120,60}
+\definecolor{warncolor}{RGB}{180,80,0}
+\definecolor{comparecolor}{RGB}{100,0,150}
+\definecolor{codegreen}{rgb}{0.1,0.5,0.1}
+\definecolor{codebg}{RGB}{245,245,250}
+
+% 定理环境
+\theoremstyle{definition}
+\newtheorem{definition}{定义}[section]
+\newtheorem{theorem}{定理}[section]
+\newtheorem{remark}{注记}[section]
+\newtheorem{proposition}{命题}[section]
+
+% tcolorbox 环境
+\newtcolorbox{keybox}[1][]{colback=red!5!white, colframe=red!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{notebox}[1][]{colback=green!5!white, colframe=green!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{derivbox}[1][]{colback=blue!5!white, colframe=blue!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{warnbox}[1][]{colback=orange!5!white, colframe=orange!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{comparebox}[1][]{colback=violet!5!white, colframe=violet!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{flowbox}[1][]{colback=cyan!5!white, colframe=cyan!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{intuitionbox}[1][]{colback=yellow!5!white, colframe=yellow!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{critiquebox}[1][]{colback=red!3!white, colframe=red!40!black, title=#1, fonttitle=\bfseries, breakable, leftrule=3pt, rightrule=0.5pt, toprule=0.5pt, bottomrule=0.5pt}
+
+% 代码样式
+\lstdefinestyle{python}{
+    language=Python,
+    basicstyle=\small\ttfamily,
+    keywordstyle=\color{blue!70!black}\bfseries,
+    commentstyle=\color{codegreen}\itshape,
+    stringstyle=\color{red!60!black},
+    backgroundcolor=\color{codebg},
+    frame=single,
+    framerule=0.4pt,
+    rulecolor=\color{gray!50},
+    breaklines=true,
+    showstringspaces=false,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    tabsize=4,
+}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\pp}{\partial}
+\newcommand{\Ta}{T_{\mathrm{a}}}
+\newcommand{\Tset}{T_{\mathrm{set}}}
+\newcommand{\Umax}{U_{\mathrm{max}}}
+
+\pagestyle{fancy}
+\fancyhead[L]{\small Group Project --- 场景建模专题}
+\fancyhead[R]{\small \today}
+\fancyfoot[C]{\thepage}
+
+\title{\textbf{场景建模的数理基础与代码设计验证} \\[6pt]
+\large 分段式 Robin BC、域 mask 与时变边界条件}
+\author{Andrea Zhang --- MATH3060/1 Group Project}
+\date{2026 年 2 月}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%% =====================================================================
+\section{概述：从统一 $h$ 到分段式边界条件}
+%% =====================================================================
+
+本文档为冲刺计划的数理验证，确保两个核心问题有答案：
+\begin{enumerate}[label=\textbf{Q\arabic*}]
+    \item \textbf{数理可行性}：分段式 Robin BC 是否有严格的数学基础？ghost-point 离散化是否保持精度和稳定性？
+    \item \textbf{代码合理性}：将 \texttt{h\_wall} 从标量推广为数组，是否改变了现有求解器的数值性质？
+\end{enumerate}
+
+\begin{flowbox}[项目重心转变]
+\centering
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners, minimum height=1cm, minimum width=3cm, align=center, font=\small},
+    arr/.style={-{Stealth[length=5pt]}, thick},
+    >=Stealth
+]
+\node[box, fill=red!10] (old) {旧方向\\``哪种控制策略最好''};
+\node[box, fill=green!10, right=3cm of old] (new) {新方向\\``不同物理场景下\\温度分布有何不同''};
+\draw[arr, red!60!black] (old) -- node[above, font=\small\itshape] {老师反馈} (new);
+\node[below=0.8cm of new, font=\small, align=center, text=blue!60!black] {窗户 / 门 / 房间形状 / 多房间\\$\Downarrow$\\全部通过 Robin BC 的 $h$ 参数建模};
+\end{tikzpicture}
+\end{flowbox}
+
+%% =====================================================================
+\section{Robin 边界条件的数学基础}
+%% =====================================================================
+
+\subsection{热方程与边界条件}
+
+考虑二维矩形域 $\Omega = [0, L_x] \times [0, L_y]$ 上的热方程：
+\begin{equation}\label{eq:heat}
+    \frac{\pp T}{\pp t} = \alpha \left( \frac{\pp^2 T}{\pp x^2} + \frac{\pp^2 T}{\pp y^2} \right) + S(x, y, t),
+\end{equation}
+其中 $\alpha$ 为热扩散率，$S$ 为热源项（加热器）。
+
+\begin{keybox}[Robin 边界条件的统一形式]
+在边界 $\pp\Omega$ 上，Robin BC 写为
+\begin{equation}\label{eq:robin}
+    \boxed{-\alpha \frac{\pp T}{\pp n} = h \cdot (T - \Ta)}
+\end{equation}
+其中 $n$ 为外法向，$h \geq 0$ 为\textbf{热传递系数}（单位 $\mathrm{m}^{-1}$），$\Ta$ 为室外温度。
+\end{keybox}
+
+\begin{intuitionbox}[Robin BC 的三种极限情况]
+$h$ 值控制了墙面与外界的热交换强度 \cite{barakat2024robin}：
+\begin{itemize}[leftmargin=*]
+    \item $h = 0$ $\Rightarrow$ $\pp T / \pp n = 0$ (\textbf{Neumann BC}, 完全保温墙)
+    \item $h \to \infty$ $\Rightarrow$ $T \to \Ta$ (\textbf{Dirichlet BC}, 完全暴露)
+    \item $0 < h < \infty$ $\Rightarrow$ \textbf{Robin BC}, 有限热阻的真实墙面
+\end{itemize}
+\textbf{关键洞察}：窗户、门、保温墙、外墙的\emph{唯一区别}就是 $h$ 值不同！
+\end{intuitionbox}
+
+\subsection{分段式 Robin BC 的数学定义}
+
+\begin{definition}[分段式 Robin BC]
+设边界 $\Gamma$ 被分为 $M$ 段 $\Gamma = \bigcup_{m=1}^M \Gamma_m$，每段有独立的热传递系数 $h_m$。则
+\begin{equation}\label{eq:segmented-robin}
+    -\alpha \frac{\pp T}{\pp n}\bigg|_{\Gamma_m} = h_m \cdot (T - \Ta), \quad m = 1, \ldots, M.
+\end{equation}
+\end{definition}
+
+\begin{proposition}[适定性]
+对于分段常数 $h(s) \geq 0$（$s$ 为沿边界的弧长参数），只要 $h$ 在每段内为常数且在段间可以跳变，热方程 \eqref{eq:heat} 配合 \eqref{eq:segmented-robin} 构成适定的初边值问题。
+
+\textbf{证明思路}：$h(s)$ 的跳变只发生在有限个点上，这些点处温度场仍然连续（因为 $T \in C^0$ 由热方程的正则性保证），但法向导数 $\pp T/\pp n$ 在这些点可能有跳变。这不影响弱解的存在唯一性。
+\end{proposition}
+
+\subsection{各物理场景对应的 $h$ 值}
+
+\begin{comparebox}[建筑元素与 Robin 系数 $h$ 的对应关系]
+\begin{center}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{l c c l}
+\toprule
+\textbf{建筑元素} & \textbf{$h$ 值 ($\mathrm{m}^{-1}$)} & \textbf{与 $h_{\text{wall}}$ 的比值} & \textbf{依据} \\
+\midrule
+保温墙 (内墙/共用墙) & $0$ & $0\times$ & Neumann BC \\
+标准外墙 (砖+保温层) & $0.5$ & $1\times$ & 基线 \\
+单层玻璃窗 & $2.0$--$3.0$ & $4$--$6\times$ & \cite{mepacademy2024walls} \\
+双层中空玻璃窗 & $0.8$--$1.2$ & $1.6$--$2.4\times$ & \cite{incropera2007heat} \\
+门（关闭） & $\approx 0$ & $\approx 0\times$ & 保温墙近似 \\
+门（打开，通室外） & $5$--$15$ & $10$--$30\times$ & 大对流 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\textbf{设计选择}：本项目取 $h_{\text{wall}} = 0.5$, $h_{\text{window}} = 2.5$（单层）, $h_{\text{double}} = 1.0$（双层）, $h_{\text{door,open}} = 10.0$。
+\end{comparebox}
+
+%% =====================================================================
+\section{Ghost-Point 离散化：从标量到数组}
+%% =====================================================================
+
+\subsection{标准 ghost-point 方法回顾}
+
+以南边界 ($y=0$) 为例，Robin BC 为
+\begin{equation}
+    -\alpha \frac{\pp T}{\pp y}\bigg|_{y=0} = h_j \cdot (T_{i,0} - \Ta),
+\end{equation}
+其中下标 $j$ 表示 $x$ 方向第 $j$ 个网格点的 $h$ 值（分段式）。
+
+引入虚拟网格点 $T_{i,-1}$，用中心差分近似法向导数：
+\begin{equation}
+    \frac{\pp T}{\pp y}\bigg|_{y=0} \approx \frac{T_{i,1} - T_{i,-1}}{2\Delta y}.
+\end{equation}
+
+代入 Robin BC 解出虚拟点：
+\begin{equation}\label{eq:ghost}
+    T_{i,-1} = T_{i,1} + \frac{2\Delta y \cdot h_j}{\alpha} (T_{i,0} - \Ta).
+\end{equation}
+
+\begin{derivbox}[Ghost-point 代入 Laplacian 的完整推导]
+在南边界 $y=0$ 处，$y$ 方向的二阶导数本来需要 $T_{i,-1}$：
+\begin{align}
+    \frac{\pp^2 T}{\pp y^2}\bigg|_{i,0}
+    &\approx \frac{T_{i,1} - 2T_{i,0} + T_{i,-1}}{\Delta y^2} \\
+    &= \frac{T_{i,1} - 2T_{i,0} + \left[T_{i,1} + \frac{2\Delta y \cdot h_j}{\alpha}(T_{i,0} - \Ta)\right]}{\Delta y^2}
+    \quad \text{[代入 \eqref{eq:ghost}]} \\
+    &= \frac{2T_{i,1} - 2T_{i,0} + \frac{2\Delta y \cdot h_j}{\alpha}(T_{i,0} - \Ta)}{\Delta y^2} \\
+    &= \frac{2T_{i,1} - 2T_{i,0}}{\Delta y^2} + \frac{2h_j}{\alpha \cdot \Delta y}(T_{i,0} - \Ta). \label{eq:ghost-laplacian}
+\end{align}
+因此 RHS 中 $\alpha \cdot \frac{\pp^2 T}{\pp y^2}$ 的贡献为：
+\begin{equation}\label{eq:rhs-south}
+    \boxed{\alpha \cdot \frac{2T_{i,1} - 2T_{i,0} - 2\Delta y \cdot h_j (T_{i,0} - \Ta)}{\Delta y^2}}
+\end{equation}
+\end{derivbox}
+
+\begin{warnbox}[关键一致性检查]
+\textbf{当 $h_j = h_{\text{wall}}$（常数）时}，\eqref{eq:rhs-south} 退化为现有代码中的表达式：
+\begin{center}
+\texttt{(2*T[1:-1, 1] - 2*T[1:-1, 0] - 2*dy*self.h\_wall*(T[1:-1, 0] - self.T\_a)) / dy**2}
+\end{center}
+\textbf{当 $h_j$ 变为数组 \texttt{h\_south[1:-1]} 时}，NumPy 的逐元素乘法自动处理每个网格点用不同的 $h$：
+\begin{center}
+\texttt{(2*T[1:-1, 1] - 2*T[1:-1, 0] - 2*dy*self.h\_south[1:-1]*(T[1:-1, 0] - self.T\_a)) / dy**2}
+\end{center}
+\textbf{二者的区别仅在于标量乘法 vs 数组逐元素乘法}，数值格式完全相同。
+\end{warnbox}
+
+\subsection{四面墙的 ghost-point 公式汇总}
+
+\begin{notebox}[四面墙 + 四角点的完整 ghost-point 公式]
+\renewcommand{\arraystretch}{1.4}
+\begin{center}
+\begin{tabular}{l l l}
+\toprule
+\textbf{边界} & \textbf{$h$ 数组} & \textbf{RHS 中 $\alpha \cdot \pp^2 T/\pp y^2$（或 $\pp^2 T/\pp x^2$）的贡献} \\
+\midrule
+南 ($y=0$) & $h_{\text{south},j}$ & $\alpha \dfrac{2T_{j,1} - 2T_{j,0} - 2\Delta y \cdot h_{\text{south},j}(T_{j,0} - \Ta)}{\Delta y^2}$ \\[8pt]
+北 ($y=L_y$) & $h_{\text{north},j}$ & $\alpha \dfrac{2T_{j,N_y-2} - 2T_{j,N_y-1} - 2\Delta y \cdot h_{\text{north},j}(T_{j,N_y-1} - \Ta)}{\Delta y^2}$ \\[8pt]
+西 ($x=0$) & $h_{\text{west},i}$ & $\alpha \dfrac{2T_{1,i} - 2T_{0,i} - 2\Delta x \cdot h_{\text{west},i}(T_{0,i} - \Ta)}{\Delta x^2}$ \\[8pt]
+东 ($x=L_x$) & $h_{\text{east},i}$ & $\alpha \dfrac{2T_{N_x-2,i} - 2T_{N_x-1,i} - 2\Delta x \cdot h_{\text{east},i}(T_{N_x-1,i} - \Ta)}{\Delta x^2}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+四个角点各自应用两个方向的 ghost-point 公式。
+\end{notebox}
+
+\subsection{精度与稳定性分析}
+
+\begin{theorem}[局部截断误差]
+ghost-point 方法在光滑区域的局部截断误差为 $O(\Delta x^2 + \Delta y^2)$，与内部中心差分一致。在 $h$ 的跳变点处，由于 $\pp T/\pp n$ 不连续，截断误差局部降为 $O(\Delta x)$，但不影响整体收敛阶 \cite{leveque2007fdm}。
+\end{theorem}
+
+\begin{theorem}[稳定性不变性]
+将 $h$ 从标量推广为非负数组 $h_j \geq 0$ 不影响 Method of Lines 的稳定性。
+
+\textbf{证明}：半离散化后的 ODE 系统为 $\dot{\mathbf{T}} = A\mathbf{T} + \mathbf{b}$，其中 $A$ 是对角占优矩阵。增大某些边界点的 $h$ 值等价于增大 $A$ 对角元素的绝对值（更强的散热），使 $A$ 的特征值实部更负，从而使系统\emph{更稳定}而非更不稳定。因此，只要 $h_j \geq 0$，RK45 的稳定性不受影响。
+\end{theorem}
+
+%% =====================================================================
+\section{六大场景的数学建模}
+%% =====================================================================
+
+\begin{flowbox}[六场景体系结构]
+\centering
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners, minimum width=2.5cm, minimum height=0.8cm, align=center, font=\small},
+    arr/.style={-{Stealth[length=4pt]}, thick},
+]
+\node[box, fill=gray!10] (s1) {S1 基线};
+\node[box, fill=blue!10, right=1cm of s1] (s2) {S2 加窗户};
+\node[box, fill=blue!15, right=1cm of s2] (s3) {S3 窗户参数};
+\node[box, fill=orange!10, below=0.6cm of s1] (s4) {S4 开门};
+\node[box, fill=green!10, below=0.6cm of s2] (s5) {S5 长窄};
+\node[box, fill=purple!10, below=0.6cm of s3] (s6) {S6 L 形};
+
+\draw[arr] (s1) -- (s2) node[midway, above, font=\tiny] {+分段$h$};
+\draw[arr] (s2) -- (s3) node[midway, above, font=\tiny] {变参数};
+\draw[arr] (s1) -- (s4) node[midway, left, font=\tiny] {+时变BC};
+\draw[arr] (s1) -- (s5) node[midway, left, font=\tiny, xshift=-3pt] {变$L_x/L_y$};
+\draw[arr] (s1) -- (s6) node[midway, right, font=\tiny, xshift=8pt] {+域mask};
+\end{tikzpicture}
+\end{flowbox}
+
+\subsection{S1: 基线 --- 方形房间 RNNN}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{域}: $[0, 5] \times [0, 5]\,\text{m}$
+    \item \textbf{BC}: 南墙 Robin ($h = 0.5$)，其余三面 Neumann ($h = 0$)
+    \item \textbf{物理含义}: 公寓房间，一面朝外（南墙），三面与其他房间共用
+\end{itemize}
+
+数学表达：
+\begin{equation}
+    h(s) = \begin{cases}
+        0.5 & s \in \Gamma_{\text{south}} \\
+        0   & s \in \Gamma_{\text{north}} \cup \Gamma_{\text{west}} \cup \Gamma_{\text{east}}
+    \end{cases}
+\end{equation}
+
+\subsection{S2: 窗户 --- 南墙分段 Robin BC}
+
+\begin{keybox}[窗户建模的核心思路]
+窗户 = 外墙上一段 $h$ 值更大的区间。无需引入新方程，只需：
+\begin{equation}
+    h_{\text{south}}(x) = \begin{cases}
+        h_{\text{wall}} = 0.5  & 0 \leq x < 1.5 \\
+        h_{\text{window}} = 2.5 & 1.5 \leq x \leq 3.5 \\
+        h_{\text{wall}} = 0.5  & 3.5 < x \leq 5
+    \end{cases}
+\end{equation}
+\end{keybox}
+
+\begin{intuitionbox}[为什么窗户用更大的 $h$？]
+Robin BC 中 $h$ 的物理含义是\textbf{边界热导率}。
+\begin{itemize}[leftmargin=*]
+    \item 砖墙（厚 30cm，导热系数 $\lambda \approx 0.8$ W/(m$\cdot$K)）：等效 $h \approx \lambda / d = 2.7$ m$^{-1}$，加上保温层后降至 $\sim 0.5$
+    \item 单层玻璃（厚 5mm，$\lambda \approx 1.0$）：$h \approx 1.0/0.005 = 200$，但考虑对流边界层后有效 $h \approx 2$--$3$
+    \item 双层中空玻璃：中间空气层大幅降低热传导，有效 $h \approx 0.8$--$1.2$
+\end{itemize}
+因此 $h_{\text{window}} / h_{\text{wall}} \approx 4$--$6$ 是合理的。
+\end{intuitionbox}
+
+\subsection{S3: 窗户参数对比}
+
+三种配置共享 S2 的框架，只改两个参数：
+\begin{center}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{l c c c}
+\toprule
+\textbf{配置} & \textbf{窗宽 (m)} & \textbf{$h_{\text{window}}$} & \textbf{物理含义} \\
+\midrule
+小窗 & 1.0 & 2.5 & 标准窗户 \\
+大窗 & 3.0 & 2.5 & 落地窗 \\
+双层窗 & 2.0 & 1.0 & 中等窗 + 节能玻璃 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{S4: 开门 --- 时变边界条件}
+
+\begin{keybox}[时变 BC 的数学定义]
+门位于西墙 $x=0$ 的 $y \in [1.0, 2.5]$ 区段。定义时变 $h$：
+\begin{equation}\label{eq:door}
+    h_{\text{west}}(y, t) = \begin{cases}
+        0 & y \notin [1.0, 2.5] \text{（保温墙，始终）} \\
+        0 & y \in [1.0, 2.5], \; t < t_{\text{open}} \text{（门关闭）} \\
+        h_{\text{door}} = 10.0 & y \in [1.0, 2.5], \; t_{\text{open}} \leq t \leq t_{\text{close}} \text{（门打开）} \\
+        0 & y \in [1.0, 2.5], \; t > t_{\text{close}} \text{（门关闭）}
+    \end{cases}
+\end{equation}
+\end{keybox}
+
+\begin{derivbox}[大 $h$ 极限的物理论证]
+当 $h \to \infty$ 时，Robin BC 退化为 Dirichlet BC $T = \Ta$：
+\begin{align}
+    -\alpha \frac{\pp T}{\pp n} &= h(T - \Ta) \\
+    \Rightarrow\quad T - \Ta &= -\frac{\alpha}{h} \frac{\pp T}{\pp n} \to 0 \quad \text{as } h \to \infty
+\end{align}
+取 $h_{\text{door}} = 10$ 意味着 $h_{\text{door}}/h_{\text{wall}} = 20$，足以近似``门洞直接暴露在室外''的效果。实际上 $h = 10$ 时 $T_{\text{boundary}} \approx \Ta + O(0.05)$，偏差在 $0.05$\textdegree C 量级。
+\end{derivbox}
+
+\begin{warnbox}[$h(t)$ 的跳变对 ODE 求解器的影响]
+\texttt{solve\_ivp} 使用自适应步长，$h(t)$ 在 $t_{\text{open}}$ 和 $t_{\text{close}}$ 处的不连续跳变会导致求解器在该时刻附近自动缩小步长以满足误差容限。这是正确的行为（不是 bug），但可能略微增加计算时间。
+
+\textbf{替代方案}：可以分段求解（$[0, t_{\text{open}}]$, $[t_{\text{open}}, t_{\text{close}}]$, $[t_{\text{close}}, t_{\text{end}}]$），每段内 $h$ 恒定，但增加代码复杂度。对于本项目的精度要求，直接用 callback 即可。
+\end{warnbox}
+
+\subsection{S5: 长窄房间 --- 改变长宽比}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{域}: $[0, 7.5] \times [0, 2.5]\,\text{m}$，面积 $18.75\,\text{m}^2$
+    \item \textbf{BC}: 同 S1（南墙 Robin，其余 Neumann）
+    \item \textbf{代码修改}: 只需改 \texttt{Lx=7.5, Ly=2.5}，并相应调整 \texttt{nx, ny} 保持网格密度一致
+\end{itemize}
+
+\begin{intuitionbox}[长宽比为什么重要？]
+热扩散的特征长度 $\sim \sqrt{\alpha \cdot t}$。在 $t = 60$ min, $\alpha = 0.01\,\text{m}^2/\text{min}$ 时，$\sqrt{\alpha t} \approx 0.77$ m。对于 7.5m 长的房间，加热器的热量需要穿过 $\sim 10$ 个特征长度才能到达远端，因此远端一定会显著偏冷。
+\end{intuitionbox}
+
+网格密度一致性：$\Delta x = L_x / (n_x - 1)$。基线 $\Delta x = 5/50 = 0.1$ m。长窄房间取 $n_x = 76$，$\Delta x = 7.5/75 = 0.1$ m，一致。$n_y = 26$，$\Delta y = 2.5/25 = 0.1$ m，一致。
+
+\subsection{S6: L 形房间 --- 域 mask}
+
+\begin{keybox}[L 形域的定义]
+\begin{equation}
+    \Omega_L = \left([0, 5] \times [0, 2.5]\right) \cup \left([0, 2.5] \times [2.5, 5]\right)
+\end{equation}
+等价于 $[0, 5]^2$ 去掉右上角 $[2.5, 5] \times [2.5, 5]$。面积 $= 25 - 6.25 = 18.75\,\text{m}^2$。
+\end{keybox}
+
+\textbf{域 mask 实现}：在 $5 \times 5$ 的正方形网格上定义布尔数组 \texttt{mask[i,j]}。被挖掉的区域 $\texttt{mask} = \texttt{False}$。
+
+\begin{derivbox}[Mask 区域的处理策略]
+两种可选策略：
+
+\textbf{策略 A（简单，推荐）}：mask 区域的 $\dd T/\dd t$ 强制设为 $0$：
+\begin{equation}
+    \frac{\dd T_{i,j}}{\dd t} = \begin{cases}
+        \text{正常 RHS} & \text{mask}_{i,j} = \text{True} \\
+        0               & \text{mask}_{i,j} = \text{False}
+    \end{cases}
+\end{equation}
+同时将 mask 区域的初始温度设为 $\Ta$（或 NaN 用于绘图遮罩）。
+
+\textbf{策略 B（物理更准确）}：在 L 形内凹边界上施加 Robin BC（$h = h_{\text{wall}}$），模拟内墙散热。需要识别 mask 区域与有效区域的交界网格点并额外处理。
+
+本项目采用\textbf{策略 A}，因为：(1) 代码改动最小（一行 \texttt{dTdt[\textasciitilde{}self.mask] = 0}）；(2) mask 区域温度保持 $\Ta$ 等价于内墙散热到一个很冷的腔体，定性结论不受影响。
+\end{derivbox}
+
+%% =====================================================================
+\section{代码设计验证}
+%% =====================================================================
+
+\subsection{改动范围分析}
+
+\begin{comparebox}[改动前后的代码对比]
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{l l l}
+\toprule
+\textbf{代码位置} & \textbf{改动前} & \textbf{改动后} \\
+\midrule
+\texttt{\_\_init\_\_} & \texttt{self.h\_wall = h\_wall} & \texttt{self.h\_south = np.full(nx, h\_wall)} \\
+ & \footnotesize{(1 个标量)} & \footnotesize{(4 个数组, 支持 dict 覆盖)} \\
+\midrule
+\texttt{rhs()} 南墙 & \texttt{self.h\_wall * (...)} & \texttt{self.h\_south[1:-1] * (...)} \\
+\footnotesize{(类推其余 3 面 + 4 角)} & \footnotesize{标量 $\times$ 数组} & \footnotesize{数组 $\times$ 数组（逐元素）} \\
+\midrule
+\texttt{rhs()} 末尾 & （无） & \texttt{dTdt[\textasciitilde{}self.mask] = 0} \\
+\midrule
+\texttt{rhs()} 开头 & （无） & \texttt{if self.\_h\_updater: ...} \\
+\bottomrule
+\end{tabular}
+\end{comparebox}
+
+\subsection{向后兼容性}
+
+\begin{theorem}[向后兼容]
+当 \texttt{wall\_h=None}（默认）且 \texttt{domain\_mask=None}（默认）时，新代码的行为与旧代码\textbf{完全一致}。
+
+\textbf{证明}：
+\begin{enumerate}
+    \item \texttt{wall\_h=None} $\Rightarrow$ 四个数组均为 \texttt{np.full(n, h\_wall)}，即常数数组
+    \item 常数数组的切片 \texttt{h\_south[1:-1]} 与标量 \texttt{h\_wall} 在 NumPy 广播下的乘法结果相同
+    \item \texttt{domain\_mask=None} $\Rightarrow$ \texttt{mask = np.ones(...)}, 即 \texttt{dTdt[\textasciitilde{}mask] = 0} 不影响任何点
+    \item \texttt{\_h\_updater} 不存在 $\Rightarrow$ callback 不执行
+\end{enumerate}
+\end{theorem}
+
+\subsection{数值验证清单}
+
+\begin{notebox}[实施前必做的验证]
+\begin{enumerate}[label=\textbf{V\arabic*}]
+    \item \textbf{回归测试}: 用默认参数跑 S1，对比改动前后的 $T(x,y,t_{\text{end}})$，最大偏差 $< 10^{-10}$
+    \item \textbf{对称性测试}: S1 中南墙 $h=0.5$，其余 $h=0$，温度场应关于 $x = L_x/2$ 对称
+    \item \textbf{极限测试}: 设 $h_{\text{south}} = 10^6$，验证南墙温度 $\approx \Ta$（Dirichlet 极限）
+    \item \textbf{能量守恒}: 总能量变化 $= $ 加热器输入 $-$ 边界散热（通过 $h$），二者之差 $< 1\%$
+\end{enumerate}
+\end{notebox}
+
+%% =====================================================================
+\section{批判性分析}
+%% =====================================================================
+
+\begin{critiquebox}[分段 Robin BC 建模方法的评价]
+\textbf{优势}：
+\begin{itemize}[leftmargin=*]
+    \item 数学上严格：Robin BC 的 $h$ 参数化涵盖了 Dirichlet 和 Neumann 作为极限情况
+    \item 代码改动最小：仅将标量替换为数组，不改变数值格式
+    \item 向后兼容：默认参数下行为不变
+    \item 灵活性高：同一框架支持窗户、门、不同墙面材质
+\end{itemize}
+
+\textbf{局限}：
+\begin{itemize}[leftmargin=*]
+    \item 窗户/门只建模为``高 $h$ 区域''，忽略了玻璃的有限厚度和内部温度梯度
+    \item 开门通风仅通过增大 $h$ 建模，忽略了对流（空气流动）的影响
+    \item L 形的域 mask 策略 A 不精确建模内墙边界
+\end{itemize}
+
+\textbf{未解决的问题}：
+\begin{itemize}[leftmargin=*]
+    \item 窗户附近的热桥效应（窗框处的 2D 传热）未建模
+    \item 多房间耦合的内墙传热需要更精细的处理
+\end{itemize}
+
+\textbf{对本项目的适用性}：老师关注的是``是否考虑了不同的物理可能性''，而非精确的工程模拟。分段 Robin BC 足以展示窗户、门、形状等因素的\textbf{定性影响}，且数学基础扎实，适合在报告中呈现。
+\end{critiquebox}
+
+%% =====================================================================
+\section{与小组计划的对接}
+%% =====================================================================
+
+\begin{flowbox}[个人冲刺 $\to$ 小组报告的映射]
+\centering
+\begin{tikzpicture}[
+    mybox/.style={draw, rounded corners, minimum width=3.5cm, minimum height=0.7cm, align=center, font=\small},
+    arr/.style={-{Stealth[length=4pt]}, thick, blue!60!black},
+]
+\node[mybox, fill=cyan!10] (code) {Hour 1--4: 代码开发\\(\texttt{pde\_2d\_model.py} 扩展)};
+\node[mybox, fill=cyan!10, right=2cm of code] (report23) {报告 \S2--3\\Mathematical Model\\+ Numerical Methods};
+\draw[arr] (code) -- node[above, font=\tiny] {推导公式直接用} (report23);
+
+\node[mybox, fill=green!10, below=0.8cm of code] (exp) {Hour 5--10: 跑实验\\6 组场景 $\times$ 3--4 张图};
+\node[mybox, fill=green!10, right=2cm of exp] (report5) {报告 \S5\\Results\\(20 张图)};
+\draw[arr] (exp) -- node[above, font=\tiny] {图表直接复制} (report5);
+
+\node[mybox, fill=orange!10, below=0.8cm of exp] (findings) {Hour 11: Key Findings\\(\texttt{key\_findings.md})};
+\node[mybox, fill=orange!10, right=2cm of findings] (report6) {报告 \S6\\Discussion\\+ Conclusions};
+\draw[arr] (findings) -- node[above, font=\tiny] {结论直接用} (report6);
+\end{tikzpicture}
+\end{flowbox}
+
+%% =====================================================================
+\section{自检清单}
+%% =====================================================================
+
+\begin{enumerate}[label=$\square$, leftmargin=2em]
+    \item 能写出 Robin BC 的标准形式 \eqref{eq:robin}，并解释 $h=0$、$h\to\infty$ 的物理含义
+    \item 能推导 ghost-point 代入 Laplacian 后的表达式 \eqref{eq:rhs-south}
+    \item 能解释为什么 $h$ 从标量变为数组不影响稳定性
+    \item 能说出窗户、门、保温墙对应的 $h$ 值量级
+    \item 能画出 S2 窗户场景中 $h_{\text{south}}(x)$ 的分段图
+    \item 能解释 L 形域 mask 策略 A 的物理近似和局限
+    \item 能向队友解释代码改动只有 \textbf{12 处} \texttt{h\_wall} $\to$ \texttt{h\_south/north/west/east}
+\end{enumerate}
+
+\printbibliography
+
+\end{document}

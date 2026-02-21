@@ -1,0 +1,214 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{float}
+
+\title{Week 2 Report: 1D Heat Equation with Bang-Bang Control\\
+\large Thermostat Placement Experiment}
+\author{Group Project - Room Heating System}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+This report documents the numerical implementation and validation of the 1D heat equation with Bang-Bang thermostat control. The key objectives are:
+\begin{enumerate}
+    \item Validate numerical solution against analytical steady-state solution
+    \item Study the effect of thermostat placement on control performance
+    \item Evaluate results against thermal comfort standards (ASHRAE 55)
+\end{enumerate}
+
+\section{Mathematical Model}
+
+\subsection{Governing Equation}
+
+The 1D heat conduction equation with a point heat source:
+\begin{equation}
+    \frac{\partial T}{\partial t} = \alpha \frac{\partial^2 T}{\partial x^2} + \frac{\alpha}{k_1} P \cdot \delta(x - x_0)
+\end{equation}
+where:
+\begin{itemize}
+    \item $T(x,t)$: temperature field
+    \item $\alpha$: thermal diffusivity (m$^2$/min)
+    \item $k_1$: thermal conductivity
+    \item $P$: heater power
+    \item $\delta(x-x_0)$: Dirac delta function (point heat source at $x_0$)
+\end{itemize}
+
+\textbf{Key Correction}: The heat source term must include the factor $\alpha/k_1$ to ensure the numerical solution converges to the correct analytical steady-state.
+
+\subsection{Boundary Conditions}
+
+\begin{itemize}
+    \item \textbf{Left (x=0)}: Neumann (insulated wall): $\displaystyle\frac{\partial T}{\partial x}\bigg|_{x=0} = 0$
+    \item \textbf{Right (x=L)}: Robin (convective wall): $\displaystyle -k_1 \frac{\partial T}{\partial x}\bigg|_{x=L} = h(T(L,t) - T_a)$
+\end{itemize}
+
+\subsection{Analytical Steady-State Solution}
+
+At steady state ($\partial T/\partial t = 0$):
+\begin{equation}
+    T(x) = \begin{cases}
+        T_a + \frac{P}{h} + \frac{P}{k_1}(L - x_0), & 0 \leq x \leq x_0 \\[8pt]
+        T_a + \frac{P}{h} + \frac{P}{k_1}(L - x), & x_0 < x \leq L
+    \end{cases}
+\end{equation}
+
+\section{Thermal Comfort Standards}
+
+According to ASHRAE Standard 55 and ISO 7730:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Season & Temperature Range & Notes \\
+\midrule
+Winter & 20--24$^\circ$C & Heating season \\
+Summer & 22.5--26$^\circ$C & Cooling season \\
+Optimal & 18--26$^\circ$C & Year-round comfort \\
+\bottomrule
+\end{tabular}
+\caption{Thermal comfort temperature ranges}
+\end{table}
+
+Additional requirements:
+\begin{itemize}
+    \item Vertical temperature difference (head to ankle): $\leq 3^\circ$C (seated)
+    \item Air velocity: $< 0.15$ m/s to avoid draft sensation
+\end{itemize}
+
+\section{Numerical Implementation}
+
+\subsection{Parameters}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Parameter & Symbol & Value \\
+\midrule
+Room length & $L$ & 5.0 m \\
+Thermal diffusivity & $\alpha$ & 0.5 m$^2$/min \\
+Thermal conductivity & $k_1$ & 1.0 \\
+Convection coefficient & $h$ & 0.5 \\
+Maximum heating power & $U_{\max}$ & 5.0 \\
+Outdoor temperature & $T_a$ & 5$^\circ$C \\
+Setpoint temperature & $T_{\text{set}}$ & 20$^\circ$C \\
+Hysteresis width & $\delta$ & 0.5$^\circ$C \\
+\bottomrule
+\end{tabular}
+\caption{Simulation parameters}
+\end{table}
+
+\subsection{Time Scale Analysis}
+
+The diffusion time scale is:
+\begin{equation}
+    \tau = \frac{L^2}{\alpha} = \frac{25}{0.5} = 50 \text{ min}
+\end{equation}
+
+The system reaches approximate steady state after $4$--$5\tau \approx 200$--$250$ min.
+
+\section{Results and Figure Explanations}
+
+\subsection{Figure 1: Numerical Validation}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{Result_CN/fig1_validation.png}
+\caption{Validation of numerical solution against analytical steady-state}
+\end{figure}
+
+\textbf{Left panel}: Temperature evolution from initial condition ($T_a = 5^\circ$C) to steady state. Color gradient shows time progression from $t=0$ (dark) to $t=3\tau$ (light). The red dashed line is the analytical steady-state solution.
+
+\textbf{Right panel}: Comparison at final time. Maximum error = 0.49$^\circ$C, confirming the numerical implementation is correct.
+
+\textbf{Physical interpretation}: Heat flows from the point source ($x_0 = 2.5$m) toward the convective wall ($x=L$). The left side (insulated) maintains constant temperature, while the right side shows linear decrease due to heat loss through convection.
+
+\subsection{Figure 2: Bang-Bang Control Simulation}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{Result_CN/fig2_simulation.png}
+\caption{1D simulation with Bang-Bang control (heater and sensor at $x=2.5$m)}
+\end{figure}
+
+\textbf{Top panel (heatmap)}: Spatiotemporal temperature field $T(x,t)$. Horizontal axis is time, vertical axis is position. The cyan dashed line marks the heater/sensor location. Hot colors indicate higher temperatures near the heater.
+
+\textbf{Middle panel}: Temperature time series. Green line = sensor reading; Blue line = room average. The sensor oscillates around the setpoint (20$^\circ$C) within the hysteresis band ($T_L = 19.5^\circ$C to $T_H = 20.5^\circ$C). The green shaded region indicates the ASHRAE comfort zone.
+
+\textbf{Bottom panel}: Heater ON/OFF status. The Bang-Bang controller switches frequently (58 times in 60 min) when the sensor is at the heat source location.
+
+\textbf{Key observation}: While the sensor maintains the setpoint, the room average temperature ($\approx 18^\circ$C) is below the setpoint, and the boundary regions are even colder.
+
+\subsection{Figure 3: Thermostat Placement Comparison}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{Result_CN/fig3_placement.png}
+\caption{Effect of thermostat placement on control performance}
+\end{figure}
+
+This figure compares five sensor positions ($x_s = 0, 1.25, 2.5, 3.75, 5.0$ m) with the heater fixed at $x_0 = 2.5$ m.
+
+\textbf{Top-left (Sensor Reading)}:
+\begin{itemize}
+    \item $x_s = 2.5$m (at heater): Sensor oscillates tightly around setpoint
+    \item $x_s = 0$m (insulated wall): Slower response, good control
+    \item $x_s = 5.0$m (convective wall): Sensor never reaches setpoint; heater runs continuously
+\end{itemize}
+
+\textbf{Top-right (Room Average)}:
+All configurations achieve similar room average temperature ($\approx 17$--$20^\circ$C), but with different dynamics.
+
+\textbf{Bottom-left (Coldest Point)}:
+The minimum temperature in the room shows when comfort violations occur. Most configurations have minimum temperatures below the comfort threshold (18$^\circ$C), indicating the room is not uniformly comfortable.
+
+\textbf{Bottom-right (Trade-off Chart)}:
+\begin{itemize}
+    \item \textbf{Energy}: Sensor at cold locations ($x_s = 3.75$m, $5.0$m) causes continuous heating $\rightarrow$ highest energy use
+    \item \textbf{RMSE}: Sensor at the heater ($x_s = 2.5$m) has lowest sensor RMSE but similar room-average RMSE
+\end{itemize}
+
+\section{Key Findings}
+
+\begin{enumerate}
+    \item \textbf{Numerical validation successful}: Max error $< 0.5^\circ$C after correcting the heat source term.
+
+    \item \textbf{Heat source term correction}: The correct form is $S = (\alpha/k_1) \cdot P \cdot \delta(x-x_0)$, not $P \cdot \delta(x-x_0)$.
+
+    \item \textbf{Thermostat placement matters}:
+    \begin{itemize}
+        \item At heat source: Tight control but high switching frequency (58 switches)
+        \item At cold wall: Heater runs continuously, wastes energy
+        \item Optimal: Between heat source and boundary (e.g., $x_s = 1.25$m)
+    \end{itemize}
+
+    \item \textbf{Comfort zone challenges}: With a point heat source, achieving uniform room temperature within the comfort zone is difficult. The coldest point typically falls below the 18$^\circ$C comfort minimum.
+\end{enumerate}
+
+\section{Recommendations for Future Work}
+
+\begin{enumerate}
+    \item Consider distributed heat sources instead of point sources
+    \item Implement PID control to reduce switching frequency
+    \item Add spatial averaging to the sensor feedback
+    \item Study 2D models for more realistic room geometry
+\end{enumerate}
+
+\section{References}
+
+\begin{enumerate}
+    \item ASHRAE Standard 55-2023: Thermal Environmental Conditions for Human Occupancy
+    \item ISO 7730:2005: Ergonomics of the thermal environment
+    \item Handnote derivations (Project 2 documentation)
+\end{enumerate}
+
+\end{document}
