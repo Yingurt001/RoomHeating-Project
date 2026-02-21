@@ -1,0 +1,773 @@
+\documentclass[11pt,a4paper]{article}
+
+% 修复 tcolorbox 6.9.0 与旧 LaTeX 内核的兼容性问题
+\ifdefined\NewTaggingSocket\else
+  \newcommand\NewStructureName[1]{}
+  \newcommand\AssignStructureRole[2]{}
+  \newcommand\NewTaggingSocket[2]{}
+  \newcommand\NewTaggingSocketPlug[3]{}
+  \newcommand\AssignTaggingSocketPlug[2]{}
+  \newcommand\UseTaggingSocket[1]{}
+  \newcommand\UseStructureName[1]{}
+  \newcommand\tagstructbegin[1]{}
+  \newcommand\tagstructend{}
+  \newcommand\tagpdfparaOff{}
+\fi
+
+\usepackage[UTF8]{ctex}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{geometry}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,decorations.pathreplacing,calc,patterns}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{makecell}
+\usepackage{multirow}
+\usepackage{listings}
+
+% BibLaTeX
+\usepackage[backend=biber, style=authoryear, maxnames=2, natbib=true]{biblatex}
+\addbibresource{references_integration.bib}
+
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue!60!black, citecolor=green!50!black, urlcolor=cyan!60!black}
+
+\geometry{left=2.2cm, right=2.2cm, top=2.2cm, bottom=2.2cm}
+
+% 颜色定义
+\definecolor{defcolor}{RGB}{0,100,150}
+\definecolor{thmcolor}{RGB}{150,50,0}
+\definecolor{keycolor}{RGB}{200,0,50}
+\definecolor{notecolor}{RGB}{0,120,60}
+\definecolor{warncolor}{RGB}{180,80,0}
+\definecolor{comparecolor}{RGB}{100,0,150}
+\definecolor{codegreen}{RGB}{0,120,0}
+\definecolor{codegray}{RGB}{100,100,100}
+
+% 定理环境
+\theoremstyle{definition}
+\newtheorem{definition}{定义}[section]
+\newtheorem{lemma}{引理}[section]
+\newtheorem{theorem}{定理}[section]
+\newtheorem{remark}{注记}[section]
+\newtheorem{proposition}{命题}[section]
+\newtheorem{example}{例}[section]
+\newtheorem{corollary}{推论}[section]
+
+% tcolorbox 环境
+\newtcolorbox{keybox}[1][]{colback=red!5!white, colframe=red!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{notebox}[1][]{colback=green!5!white, colframe=green!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{derivbox}[1][]{colback=blue!5!white, colframe=blue!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{warnbox}[1][]{colback=orange!5!white, colframe=orange!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{comparebox}[1][]{colback=violet!5!white, colframe=violet!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{flowbox}[1][]{colback=cyan!5!white, colframe=cyan!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{intuitionbox}[1][]{colback=yellow!5!white, colframe=yellow!60!black, title=#1, fonttitle=\bfseries, breakable}
+\newtcolorbox{critiquebox}[1][]{colback=red!3!white, colframe=red!40!black, title=#1, fonttitle=\bfseries, breakable, leftrule=3pt, rightrule=0.5pt, toprule=0.5pt, bottomrule=0.5pt}
+
+% 代码列表样式
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!70!black}\bfseries,
+  commentstyle=\color{codegray}\itshape,
+  stringstyle=\color{codegreen},
+  breaklines=true,
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{gray!50},
+  backgroundcolor=\color{gray!5},
+  numbers=left,
+  numberstyle=\tiny\color{codegray},
+  language=Python,
+}
+
+% 自定义命令
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\norm}[1]{\|#1\|}
+\newcommand{\inner}[2]{\langle #1, #2 \rangle}
+\newcommand{\Tset}{T_{\text{set}}}
+\newcommand{\Ta}{T_a}
+\newcommand{\Umax}{U_{\max}}
+\newcommand{\Tss}{T_{\text{ss}}}
+\newcommand{\Thigh}{T_H}
+\newcommand{\Tlow}{T_L}
+\newcommand{\code}[1]{\texttt{\small #1}}
+
+% 页眉
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small RoomHeating Project --- Week 4}
+\fancyhead[R]{\small 手写笔记与代码整合分析}
+\fancyfoot[C]{\thepage}
+
+\title{\textbf{专题研究笔记：三个 Note 的数学思想与代码整合分析} \\ \large Week 4 手写笔记 $\leftrightarrow$ RoomHeating 代码库映射}
+\author{Group Project --- Room Heating System Control}
+\date{2026 年 2 月 19 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%==========================================================================
+\part{三个 Note 的数学思想系统梳理}
+%==========================================================================
+
+\section{Note 1：从 ODE 到 PDE 的解析推导}
+
+Note 1 共 6 页，建立了从 ODE（零维）到 1D PDE 再到 2D PDE 的完整解析框架。
+其核心价值在于：为数值仿真提供\textbf{解析基准解}（analytical benchmark），用于验证代码正确性。
+
+\subsection{ODE 解析解}
+
+\begin{derivbox}[Newton 冷却定律的精确解 {[Note 1, p.1]}]
+起始方程：
+\begin{equation}
+\frac{dT}{dt} = -k(T - \Ta) + u(t)
+\end{equation}
+当 $u(t) = U_t$（分段常数）时，用积分因子法 $e^{kt}$ 得：
+\begin{align}
+\frac{d}{dt}\bigl[e^{kt} T(t)\bigr] &= e^{kt}\bigl[k\Ta + U_t\bigr] \\
+\Rightarrow\quad T(t) &= \Ta + \frac{U_t}{k} + e^{-k(t-t_0)}\Bigl(T(t_0) - \Ta - \frac{U_t}{k}\Bigr)
+\end{align}
+\end{derivbox}
+
+\begin{keybox}[ODE 解析解 --- 两种工况]
+\textbf{关机}（$U_t = 0$）：
+\begin{equation}\boxed{
+T_{\text{off}}(t) = \Ta + \bigl(T(t_0) - \Ta\bigr) e^{-k(t-t_0)}
+}\end{equation}
+温度指数衰减至室外温度 $\Ta$。
+
+\textbf{开机}（$U_t = \Umax$）：
+\begin{equation}\boxed{
+T_{\text{on}}(t) = \Ta + \frac{\Umax}{k} + \Bigl(T(t_0) - \Ta - \frac{\Umax}{k}\Bigr) e^{-k(t-t_0)}
+}\end{equation}
+温度指数趋近稳态 $\Tss = \Ta + \Umax/k$。
+\end{keybox}
+
+\begin{intuitionbox}[为什么解析解重要？]
+数值方法（如 \code{solve\_ivp} 的 RK45）给出的是近似解。
+解析解提供了\textbf{精确基准}——若数值解与解析解的误差超过求解器容差，则代码有 bug。
+这是验证（verification）与确认（validation）的第一步。
+\end{intuitionbox}
+
+\subsection{Bang-Bang 振荡周期分析}
+
+\begin{derivbox}[升温/降温时间推导 {[Note 1, p.1--2]}]
+设 Bang-Bang 控制器在 $[\Tlow, \Thigh] = [\Tset - \delta, \Tset + \delta]$ 之间切换。
+
+\textbf{升温阶段}：从 $\Tlow$ 加热到 $\Thigh$，令 $T(0) = \Tlow$，$U_t = \Umax$：
+\begin{align}
+\Thigh &= \Ta + \frac{\Umax}{k} + \Bigl(\Tlow - \Ta - \frac{\Umax}{k}\Bigr) e^{-kt_{\text{on}}} \\
+\Rightarrow\quad t_{\text{on}} &= \frac{1}{k}\ln\frac{\Tlow - (\Ta + \Umax/k)}{\Thigh - (\Ta + \Umax/k)}
+= \frac{1}{k}\ln\frac{\Tss - \Tlow}{\Tss - \Thigh}
+\end{align}
+
+\textbf{降温阶段}：从 $\Thigh$ 自然冷却到 $\Tlow$，$U_t = 0$：
+\begin{align}
+\Tlow &= \Ta + (\Thigh - \Ta) e^{-kt_{\text{off}}} \\
+\Rightarrow\quad t_{\text{off}} &= \frac{1}{k}\ln\frac{\Thigh - \Ta}{\Tlow - \Ta}
+\end{align}
+\end{derivbox}
+
+\begin{keybox}[Bang-Bang 关键指标 {[Note 1, p.2]}]
+\begin{align}
+\text{周期}\quad P &= t_{\text{on}} + t_{\text{off}} \label{eq:period}\\
+\text{开关次数}\quad N_{\text{sw}} &= \frac{2}{P} \times T_{\text{total}} \label{eq:nsw}\\
+\text{能耗}\quad E &= \Umax \cdot t_{\text{on}} \quad\text{(每周期)} \label{eq:energy-period}\\
+\text{总能耗}\quad E_{\text{total}} &= \frac{T_{\text{total}}}{P}\cdot \Umax \cdot t_{\text{on}} + N_{\text{sw}} \cdot \epsilon \label{eq:etotal}
+\end{align}
+其中 $\epsilon$ 为每次开关的附加能耗（设备启停损耗）。
+\end{keybox}
+
+\begin{warnbox}[Zeno 现象：$\delta \to 0$ 的病态 {[Note 1, p.2]}]
+当 $\delta \to 0$ 时，$\Thigh \to \Tlow \to \Tset$，有
+\[
+t_{\text{on}}, t_{\text{off}} \to \frac{1}{k}\ln(1) = 0
+\]
+开关频率趋于无穷大——\textbf{Zeno 现象} \cite{zhang2001zeno}。
+物理上加热器无法无限快切换，数值上求解器会陷入无穷多事件。
+解决方案：引入滞回带 $\delta > 0$（hysteresis）\cite{goebel2012hybrid}。
+\end{warnbox}
+
+
+\subsection{1D PDE 稳态解析解}
+
+\begin{derivbox}[点热源 1D 稳态解 {[Note 1, p.3--4]}]
+热方程：$\partial T / \partial t = \alpha \partial^2 T / \partial x^2 + u(x,t)$。
+
+点热源模型：$u(x,t) = q(t)\cdot\delta(x - x_0)$，功率 $P = q(t)$。
+
+稳态时 $\partial T/\partial t = 0$，稳态方程：
+\begin{equation}
+k_1 T''(x) + P\,\delta(x - x_0) = 0
+\end{equation}
+边界条件：
+$T'(0) = 0$（左侧绝热），$-k_1 T'(L) = h\bigl(T(L) - \Ta\bigr)$（右侧 Robin）。
+
+在 $[0, x_0)$ 和 $(x_0, L]$ 段分别有 $T'' = 0$，即 $T$ 为线性函数。
+通过在 $x_0$ 处积分跳跃条件 $T'(x_0^+) - T'(x_0^-) = -P/k_1$
+以及温度连续性 $T(x_0^-) = T(x_0^+)$，解得：
+
+\begin{equation}\boxed{
+T(x) = \begin{cases}
+\Ta + \dfrac{P}{h} + \dfrac{P}{k_1}(L - x_0), & 0 \le x \le x_0 \\[8pt]
+\Ta + \dfrac{P}{h} + \dfrac{P}{k_1}(L - x), & x_0 < x \le L
+\end{cases}
+}\end{equation}
+\end{derivbox}
+
+\begin{intuitionbox}[1D 稳态温度分布的物理直觉]
+\begin{itemize}[nosep]
+\item 左侧（绝热壁到热源）：温度\textbf{恒定}（$T'=0$ 段），因为热量只向右流。
+\item 右侧（热源到对流壁）：温度\textbf{线性递减}，斜率 $= P/k_1$。
+\item 右壁温度 $T(L) = \Ta + P/h$：由 Robin BC 决定，$h$ 越大越接近 $\Ta$。
+\item 热源越靠左（$x_0$ 小），右侧线性段越长，壁面温度越高。
+\end{itemize}
+\end{intuitionbox}
+
+\subsection{2D PDE 稳态分析}
+
+\begin{notebox}[2D Green's Function 方法 {[Note 1, p.5--6]}]
+2D 稳态方程：
+\begin{equation}
+k_1 \Delta T + P\,\delta(x-x_0)\delta(y-y_0) = 0, \quad -k_1 \partial_n T = h(T - \Ta) \text{ on } \partial\Omega
+\end{equation}
+令 $\theta = T - \Ta$，定义 Green 函数 $G(\vec{r}, \vec{r}_0)$ 满足：
+\begin{equation}
+k_1 \Delta G + \delta(\vec{r} - \vec{r}_0) = 0, \quad -k_1 \partial_n G = h G \text{ on } \partial\Omega
+\end{equation}
+则稳态解 $T(x,y) = \Ta + P\,G(\vec{r}, \vec{r}_0)$。
+
+\textbf{结论}：矩形域 + 四面 Robin BC 的 Green 函数\textbf{没有简洁闭式解}，
+需要用特征函数展开（双重 Fourier 级数）或直接数值求解。
+\end{notebox}
+
+这解释了为什么代码中采用有限差分数值方法而非解析求解 2D 情况。
+
+%--------------------------------------------------------------------------
+\section{Note 2：有限差分离散格式}
+
+Note 2 共 4 页，给出了 1D 和 2D 热方程的\textbf{完整有限差分离散格式}，
+是代码实现的直接数学基础。
+
+\subsection{1D FDM：从绝热到 Robin BC}
+
+\begin{keybox}[1D 统一离散格式 {[Note 2, p.3]}]
+引入参数 $\gamma$ 统一处理两种边界：
+\[
+\gamma = \begin{cases}
+0, & \text{绝热（insulated）} \\
+\dfrac{2h\Delta x}{k}, & \text{非绝热（Robin）}
+\end{cases}
+\]
+
+\textbf{左边界}（$i=0$，散热 + 热源）：
+\begin{equation}\boxed{
+T_0^{n+1} = T_0^n + \frac{\alpha\Delta t}{(\Delta x)^2}\bigl[2T_1^n - 2T_0^n - \gamma(T_0^n - \Ta)\bigr] + \Delta t\, u_0^n
+}\end{equation}
+
+\textbf{内部节点}（$i=1,\ldots,N-1$，纯传导）：
+\begin{equation}\boxed{
+T_i^{n+1} = T_i^n + \frac{\alpha\Delta t}{(\Delta x)^2}\bigl(T_{i+1}^n - 2T_i^n + T_{i-1}^n\bigr) + \Delta t\, u_i^n
+}\end{equation}
+
+\textbf{右边界}（$i=N$，散热）：
+\begin{equation}\boxed{
+T_N^{n+1} = T_N^n + \frac{\alpha\Delta t}{(\Delta x)^2}\bigl[2T_{N-1}^n - 2T_N^n - \gamma(T_N^n - \Ta)\bigr] + \Delta t\, u_N^n
+}\end{equation}
+\end{keybox}
+
+\begin{intuitionbox}[$\gamma$ 参数的物理直觉]
+$\gamma = 2h\Delta x / k$ 本质是\textbf{Biot 数}的离散版本——衡量对流散热 vs 导热的相对强度。
+\begin{itemize}[nosep]
+\item $\gamma = 0$：墙壁完全绝热，边界等价于 Neumann $\partial T/\partial n = 0$。
+\item $\gamma \gg 1$：强对流散热，边界温度趋近 $\Ta$（接近 Dirichlet）。
+\item 窗户 $\gamma_{\text{win}} \approx 5\gamma_{\text{wall}}$：窗户散热远强于普通墙壁。
+\end{itemize}
+\end{intuitionbox}
+
+\subsection{2D FDM：完整边界处理}
+
+\begin{keybox}[2D 有限差分——四边界更新公式 {[Note 2, p.4]}]
+内部节点（五点格式，$\Delta x = \Delta y$）：
+\begin{equation}
+T_{i,j}^{n+1} = T_{i,j}^n + \frac{\alpha\Delta t}{(\Delta x)^2}\bigl(T_{i+1,j}^n + T_{i-1,j}^n + T_{i,j+1}^n + T_{i,j-1}^n - 4T_{i,j}^n\bigr) + \Delta t\, u_{i,j}
+\end{equation}
+
+四个边界的通用格式（以左边界 $i=0$ 为例）：
+\begin{equation}
+T_{0,j}^{n+1} = T_{0,j}^n + \frac{\alpha\Delta t}{(\Delta x)^2}\bigl[2T_{1,j}^n + T_{0,j+1}^n + T_{0,j-1}^n - 4T_{0,j}^n - \gamma_{\text{left}}(T_{0,j}^n - \Ta)\bigr] + \Delta t\, u_{0,j}
+\end{equation}
+其中 $\gamma_{\text{left}} = 2h_{\text{left}}\Delta x / k$。其他三个边界完全类似。
+\end{keybox}
+
+\begin{notebox}[Note 2 的关键创新：$\gamma$ 可以\textbf{逐网格点}变化]
+Note 2 的推导天然支持 $h$ 沿墙壁变化——不同网格点用不同 $\gamma$ 值。
+这正是代码中\textbf{分段式 Robin BC}（per-wall $h$ 数组）的数学基础：
+\begin{itemize}[nosep]
+\item 普通墙段：$h_j = 0.5$ $\Rightarrow$ $\gamma_j = 2 \times 0.5 \times \Delta x / k$
+\item 窗户段：$h_j = 2.5$ $\Rightarrow$ $\gamma_j = 2 \times 2.5 \times \Delta x / k$
+\item 关门段：$h_j = 0$ $\Rightarrow$ $\gamma_j = 0$（绝热）
+\item 开门段：$h_j = 10$ $\Rightarrow$ $\gamma_j$ 很大（近似 Dirichlet）
+\end{itemize}
+\end{notebox}
+
+%--------------------------------------------------------------------------
+\section{Note 3：四分量评价体系}
+
+Note 3 共 2 页，提出了一套\textbf{系统化的多目标评价框架}，
+将控制系统的性能评估分解为四个正交维度。
+
+\begin{keybox}[四分量加权评价函数 {[Note 3, p.1]}]
+\begin{equation}\boxed{
+J = \alpha\, J_E + \beta\, J_C + \gamma\, J_S + \delta\, J_L
+}\label{eq:J-total}
+\end{equation}
+其中各分量含义如下：
+\begin{center}
+\begin{tabular}{clp{7cm}}
+\toprule
+\textbf{符号} & \textbf{名称} & \textbf{含义} \\
+\midrule
+$J_E$ & 能耗 (Energy) & 加热器消耗的总能量 \\
+$J_C$ & 舒适度 (Comfort) & 温度偏离设定值的程度 \\
+$J_S$ & 开关代价 (Switch) & 加热器开关次数的惩罚 \\
+$J_L$ & 位置指标 (Location) & 温度空间分布和传感器代表性 \\
+\bottomrule
+\end{tabular}
+\end{center}
+权重 $\alpha, \beta, \gamma, \delta \ge 0$ 可根据不同评估需求调节。
+\end{keybox}
+
+\subsection{$J_E$：能耗}
+
+\begin{equation}
+J_E = \int_0^T u(t)\,dt
+\end{equation}
+对于 Bang-Bang 控制器，$J_E = \Umax \cdot t_{\text{on}}$（每周期）[Note 1, Eq.\eqref{eq:energy-period}]。
+
+\subsection{$J_C$：舒适度——从点到场}
+
+\begin{derivbox}[$J_C$ 的三级定义 {[Note 3, p.1]}]
+Note 3 的核心贡献之一是将舒适度指标从 ODE 推广到 PDE：
+
+\textbf{ODE}（零维，整间房一个温度）：
+\begin{equation}
+J_{C,\text{ODE}} = \int_0^T \bigl(T(t) - \Tset\bigr)^2\,dt
+\end{equation}
+
+\textbf{1D PDE}（温度沿空间分布）：
+\begin{equation}
+J_{C,\text{1D}} = \int_0^T \int_\Omega \bigl(T(x,t) - \Tset\bigr)^2\,dx\,dt
+\end{equation}
+
+\textbf{2D PDE}（温度场）：
+\begin{equation}
+J_{C,\text{2D}} = \int_0^T \iint_\Omega \bigl(T(x,y,t) - \Tset\bigr)^2\,dx\,dy\,dt
+\end{equation}
+\end{derivbox}
+
+\begin{intuitionbox}[为什么需要空间积分？]
+\textbf{恒温器只测量一个点}。当温度场不均匀时（窗户附近冷、加热器附近热），
+恒温器读数达到 $\Tset$ 并不代表全房间舒适。
+$J_{C,\text{2D}}$ 捕捉了所有位置的偏差，是更公平的舒适度评判。
+\end{intuitionbox}
+
+\subsection{$J_S$：开关惩罚}
+
+\begin{equation}
+J_S = \gamma \cdot N_{\text{switch}}
+\end{equation}
+这直接对应 Zeno 分析的动机 [Note 1, p.2]：防止高频切换导致设备损耗和数值困难。
+
+\subsection{$J_L$：位置相关指标（两个子分量）}
+
+\begin{keybox}[$J_L$ 的两个子分量 {[Note 3, p.2]}]
+
+\textbf{(1) 空间温度均匀性} $J_{L_1}$：
+
+1D: $\displaystyle J_{L_1} = \int_0^T \int_\Omega \bigl(T(x,t) - \bar{T}(t)\bigr)^2\,dx\,dt$
+
+2D: $\displaystyle J_{L_1} = \int_0^T \iint_\Omega \bigl(T(x,y,t) - \bar{T}(t)\bigr)^2\,dx\,dy\,dt$
+
+其中 $\bar{T}(t)$ 为该时刻的空间平均温度。
+
+\medskip
+
+\textbf{(2) 传感器代表性} $J_{L_2}$：
+\begin{equation}
+J_{L_2} = \int_0^T \bigl(T(x_s, y_s, t) - \bar{T}(t)\bigr)^2\,dt
+\end{equation}
+衡量恒温器读数 $T(x_s, y_s, t)$ 与房间均温 $\bar{T}(t)$ 的偏差。
+\end{keybox}
+
+\begin{intuitionbox}[$J_{L_2}$ 的实际意义]
+$J_{L_2}$ 回答了核心问题：\textbf{恒温器放在哪里最有代表性？}
+如果 $J_{L_2}$ 很大，说明恒温器位置"看到"的温度与全房间均温差距大，
+控制器会基于错误信息做出决策——导致部分区域过热、部分区域过冷。
+\end{intuitionbox}
+
+
+%==========================================================================
+\part{代码映射分析：已实现 vs 未实现}
+%==========================================================================
+
+\section{全景映射表}
+
+\begin{comparebox}[三个 Note $\leftrightarrow$ 代码库映射总览]
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{p{0.8cm}p{4.5cm}p{4cm}cX}
+\toprule
+\textbf{来源} & \textbf{数学思想} & \textbf{对应代码} & \textbf{状态} & \textbf{备注} \\
+\midrule
+\multicolumn{5}{l}{\textit{Note 1：解析推导}} \\
+N1.1 & ODE 解析解 & --- & \textcolor{red}{Gap} & 可用于验证 \code{simulate\_ode()} \\
+N1.2 & 振荡周期公式 & \code{oscillation\_period\_estimate()} & \textcolor{green!60!black}{Done} & 公式完全一致 \\
+N1.3 & Zeno 分析 & \code{BangBangNoHysteresis} & \textcolor{green!60!black}{Done} & 含实验脚本 \\
+N1.4 & 1D 稳态解析解 & --- & \textcolor{red}{Gap} & 可验证 \code{pde\_1d\_model} \\
+N1.5 & 2D Green's function & 2D FDM 数值求解 & \textcolor{green!60!black}{Done} & 确认需数值方法 \\
+\midrule
+\multicolumn{5}{l}{\textit{Note 2：有限差分格式}} \\
+N2.1 & 1D FDM + Robin BC & \code{pde\_1d\_model.py} & \textcolor{green!60!black}{Done} & Method of Lines \\
+N2.2 & $\gamma$ 参数统一框架 & per-wall $h$ arrays & \textcolor{green!60!black}{Done} & 等价实现 \\
+N2.3 & 2D FDM 五点格式 & \code{pde\_2d\_model.py:rhs()} & \textcolor{green!60!black}{Done} & ghost-point BC \\
+N2.4 & 2D 四边界格式 & \code{pde\_2d\_model.py} L.160--213 & \textcolor{green!60!black}{Done} & 含角点处理 \\
+\midrule
+\multicolumn{5}{l}{\textit{Note 3：评价体系}} \\
+N3.1 & $J_E$ 能耗 & \code{energy\_consumption()} & \textcolor{green!60!black}{Done} & 含开关代价选项 \\
+N3.2 & $J_C$ 舒适度 (ODE) & \code{temperature\_rmse()} & \textcolor{green!60!black}{Done} & RMSE 形式 \\
+N3.3 & $J_C$ 舒适度 (1D/2D 空间) & --- & \textcolor{red}{Gap} & 缺空间积分版 \\
+N3.4 & $J_S$ 开关惩罚 & \code{switching\_count()} & \textcolor{green!60!black}{Done} & \\
+N3.5 & $J_{L_1}$ 空间均匀性（时间积分） & \code{T\_nonuniformity}(仅终态) & \textcolor{orange}{Partial} & 缺时间积分 \\
+N3.6 & $J_{L_2}$ 传感器代表性 & --- & \textcolor{red}{Gap} & 完全未实现 \\
+N3.7 & 四分量加权 $J$ & \code{unified\_cost()} (仅 $Q,R$) & \textcolor{orange}{Partial} & 形式不同 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{统计}：13 个思想点中，7 个已完整实现，2 个部分实现，4 个为 Gap。
+\end{comparebox}
+
+
+\section{已实现部分的详细对照}
+
+\subsection{ODE 振荡周期：Note 1 $\leftrightarrow$ \code{ode\_model.py}}
+
+Note 1 推导的振荡周期公式 [p.2]：
+\[
+t_{\text{on}} = \frac{1}{k}\ln\frac{\Tss - \Tlow}{\Tss - \Thigh}, \quad
+t_{\text{off}} = \frac{1}{k}\ln\frac{\Thigh - \Ta}{\Tlow - \Ta}
+\]
+
+代码 \code{ode\_model.py} 第 158--176 行：
+\begin{lstlisting}
+def oscillation_period_estimate(k=K_COOL, T_a=T_AMBIENT, T_set=20.0,
+                                U_max=U_MAX, delta=0.5):
+    T_low = T_set - delta
+    T_high = T_set + delta
+    T_ss = T_a + U_max / k
+    t_heat = (1.0 / k) * np.log((T_ss - T_low) / (T_ss - T_high))
+    t_cool = (1.0 / k) * np.log((T_high - T_a) / (T_low - T_a))
+    return t_heat + t_cool
+\end{lstlisting}
+
+\textbf{完全一致}。代码直接实现了 Note 1 的公式。
+
+\subsection{2D FDM：Note 2 $\leftrightarrow$ \code{pde\_2d\_model.py}}
+
+Note 2 的左边界更新公式（$i=0$）：
+\[
+T_{0,j}^{n+1} = T_{0,j}^n + \frac{\alpha\Delta t}{(\Delta x)^2}\bigl[2T_{1,j}^n + T_{0,j+1}^n + T_{0,j-1}^n - 4T_{0,j}^n - \gamma_{\text{left}}(T_{0,j}^n - \Ta)\bigr] + \Delta t\,u_{0,j}
+\]
+
+代码 \code{pde\_2d\_model.py} 第 168--171 行（West wall）：
+\begin{lstlisting}
+dTdt[0, 1:-1] = alpha * (
+    (2*T[1,1:-1] - 2*T[0,1:-1]
+     - 2*dx*self.h_west[1:-1]*(T[0,1:-1] - self.T_a)) / dx**2
+    + (T[0,2:] - 2*T[0,1:-1] + T[0,:-2]) / dy**2
+)
+\end{lstlisting}
+
+\textbf{等价关系}：代码中 \code{2*dx*h\_west} 对应 Note 2 的
+$\gamma_{\text{left}} = 2h\Delta x / k$ 中的分子部分（代码中 $\alpha$ 已含 $k$ 因子）。
+两者在数学上完全等价，只是代码用 Method of Lines（连续时间、离散空间），
+而 Note 2 用全离散格式（前向 Euler 时间步进）。
+
+\begin{notebox}[Method of Lines vs 全离散的区别]
+\begin{itemize}[nosep]
+\item \textbf{Note 2}：空间和时间都离散化（前向 Euler），简单直观但有 CFL 稳定性限制。
+\item \textbf{代码}：仅离散空间，时间交给 \code{solve\_ivp}（自适应 RK45），
+更稳定、精度更高、不需要手动选 $\Delta t$。
+\end{itemize}
+两者的\textbf{空间离散}完全一致，差别仅在时间积分方案。
+\end{notebox}
+
+
+%==========================================================================
+\part{Gap 分析与整合方案}
+%==========================================================================
+
+\section{Gap 1：ODE 解析解验证工具}
+
+\begin{critiquebox}[当前状况：数值解缺乏解析基准]
+\textbf{$\checkmark$ 优势}：\code{simulate\_ode()} 使用成熟的 \code{solve\_ivp(RK45)}，数值精度高。
+
+\textbf{$\times$ 局限}：没有与 Note 1 解析解对照的验证测试。如果未来修改 ODE 模型参数或求解器设置，
+无法自动检测回归错误。
+
+\textbf{? 未解决}：解析解仅在 $u(t)$ 分段常数时成立，对 PID/LQR 等连续控制不适用。
+
+\textbf{$\to$ 整合方案}：在 \code{tests/test\_models.py} 中添加解析解验证测试。
+\end{critiquebox}
+
+\textbf{建议实现}——在 \code{test\_models.py} 中添加：
+\begin{lstlisting}
+def test_ode_analytical_vs_numerical():
+    """Verify numerical ODE matches Note 1 analytical solution."""
+    k, Ta, U = K_COOL, T_AMBIENT, U_MAX
+    T0 = T_INITIAL
+    # Analytical: constant heating
+    T_analytical = lambda t: Ta + U/k + (T0 - Ta - U/k)*np.exp(-k*t)
+    # Numerical
+    t_num, T_num = simulate_ode(lambda t, T: U, T0=T0, t_end=60)
+    T_ana = T_analytical(t_num)
+    assert np.max(np.abs(T_num - T_ana)) < 0.01  # < 0.01 deg
+\end{lstlisting}
+
+
+\section{Gap 2：1D 稳态解析验证}
+
+\begin{critiquebox}[1D PDE 缺乏稳态基准解]
+\textbf{$\checkmark$ 优势}：Note 1 给出了点热源下的精确稳态解。
+
+\textbf{$\times$ 局限}：代码中 \code{pde\_1d\_model.py} 无稳态对比测试。
+
+\textbf{$\to$ 整合方案}：运行 1D 仿真足够长时间（$t \to \infty$），
+将数值稳态与解析解 $T(x) = \Ta + P/h + P/k_1 \cdot \max(L-x, L-x_0)$ 对比。
+\end{critiquebox}
+
+
+\section{Gap 3：空间舒适度 $J_C$（1D/2D）}
+
+这是 Note 3 最重要的未实现思想。
+
+\begin{keybox}[Gap：\code{metrics.py} 的 RMSE 只用恒温器点温度]
+当前 \code{temperature\_rmse(t, T, T\_set)} 的 \code{T} 参数是
+\textbf{恒温器处的温度时间序列}（标量函数），
+对应 Note 3 的 $J_{C,\text{ODE}}$。
+
+但对 1D/2D 场景，真正的舒适度应该是\textbf{全空间积分}：
+\[
+J_{C,\text{2D}} = \int_0^T \iint_\Omega (T(x,y,t) - \Tset)^2\,dx\,dy\,dt
+\]
+这会捕捉到恒温器``看不到''的冷区（如窗户旁、L 形死角）。
+\end{keybox}
+
+\textbf{建议实现}——在 \code{metrics.py} 中添加：
+\begin{lstlisting}
+def spatial_comfort(t, T_field, T_set, dx, dy, mask=None):
+    """
+    J_C for 2D: integral of (T(x,y,t) - T_set)^2 over space and time.
+    T_field: shape (nx, ny, nt)
+    """
+    err2 = (T_field - T_set)**2  # (nx, ny, nt)
+    if mask is not None:
+        err2[~mask[:,:,None].repeat(err2.shape[2], axis=2)] = 0
+    # spatial integral at each time step
+    spatial_integral = np.sum(err2, axis=(0,1)) * dx * dy  # (nt,)
+    # time integral
+    return np.trapz(spatial_integral, t)
+\end{lstlisting}
+
+
+\section{Gap 4：空间均匀性 $J_{L_1}$（时间积分版）}
+
+\begin{critiquebox}[当前 \code{T\_nonuniformity} 仅用终态快照]
+\textbf{$\checkmark$ 优势}：\code{run\_scenarios.py} 的 \code{compute\_metrics()} 计算了终态温度场的标准差。
+
+\textbf{$\times$ 局限}：只看最后一帧。在动态过程中（如开门通风 S4），
+温度不均匀性随时间剧烈变化，终态 std 无法反映这一过程。
+
+\textbf{$\to$ 整合方案}：实现 Note 3 的时间积分版 $J_{L_1}$。
+\end{critiquebox}
+
+\textbf{建议实现}：
+\begin{lstlisting}
+def spatial_uniformity(t, T_field, dx, dy, mask=None):
+    """
+    J_L1: time-integrated spatial variance.
+    T_field: (nx, ny, nt)
+    """
+    if mask is not None:
+        n_active = mask.sum()
+        T_mean = np.array([T_field[:,:,i][mask].mean()
+                           for i in range(len(t))])
+        var_t = np.array([np.mean((T_field[:,:,i][mask] - T_mean[i])**2)
+                          for i in range(len(t))])
+    else:
+        T_mean = np.mean(T_field, axis=(0,1))  # (nt,)
+        var_t = np.mean((T_field - T_mean[None,None,:])**2,
+                        axis=(0,1))  # (nt,)
+    return np.trapz(var_t, t)
+\end{lstlisting}
+
+
+\section{Gap 5：传感器代表性 $J_{L_2}$}
+
+这是\textbf{完全未实现}的指标，也是 Note 3 最具洞察力的贡献。
+
+\begin{keybox}[$J_{L_2}$ 回答的核心问题：恒温器该放哪？]
+\begin{equation}
+J_{L_2} = \int_0^T \bigl(T(x_s, y_s, t) - \bar{T}(t)\bigr)^2\,dt
+\end{equation}
+\begin{itemize}[nosep]
+\item $J_{L_2}$ 小 $\Rightarrow$ 恒温器读数接近均温，控制决策合理。
+\item $J_{L_2}$ 大 $\Rightarrow$ 恒温器位置不具代表性，控制器被``欺骗''。
+\end{itemize}
+
+\textbf{应用场景}：
+\begin{enumerate}[nosep]
+\item 扫描不同 $(x_s, y_s)$，找 $\arg\min J_{L_2}$ $\Rightarrow$ 最优恒温器位置。
+\item 比较不同场景的 $\min J_{L_2}$ $\Rightarrow$ 哪种房间形状更难放恒温器。
+\item 多恒温器方案 (S8)：用 $\bar{T}_{\text{sensor}} = \text{mean/min}(T_{s_1}, T_{s_2}, T_{s_3})$ 替换单点。
+\end{enumerate}
+\end{keybox}
+
+\textbf{建议实现}：
+\begin{lstlisting}
+def sensor_representativeness(t, T_sensor, T_field, mask=None):
+    """
+    J_L2: how well does the thermostat represent room average?
+    T_sensor: (nt,) - thermostat reading
+    T_field: (nx, ny, nt) - full temperature field
+    """
+    if mask is not None:
+        T_mean = np.array([T_field[:,:,i][mask].mean()
+                           for i in range(len(t))])
+    else:
+        T_mean = np.mean(T_field, axis=(0,1))
+    return np.trapz((T_sensor - T_mean)**2, t)
+\end{lstlisting}
+
+
+\section{Gap 6：四分量加权评价函数}
+
+\begin{critiquebox}[当前 \code{unified\_cost} 与 Note 3 框架不一致]
+\textbf{$\checkmark$ 优势}：\code{unified\_cost()} 实现了 LQR 风格的 $J = \int[Q(T-\Tset)^2 + Ru^2]dt$，
+适合 LQR/Pontryagin 控制器的评估。
+
+\textbf{$\times$ 局限}：Note 3 的框架 $J = \alpha J_E + \beta J_C + \gamma J_S + \delta J_L$ 是更通用的多目标评价，
+将能耗、舒适度、开关代价、空间指标正交分解。\code{unified\_cost} 将能耗和舒适度混在 $Ru^2$ 中，
+无法单独调节。
+
+\textbf{$\to$ 整合方案}：新增 \code{weighted\_cost()} 函数，保留原 \code{unified\_cost}（向后兼容）。
+\end{critiquebox}
+
+\textbf{建议实现}：
+\begin{lstlisting}
+def weighted_cost(J_E, J_C, J_S, J_L,
+                  alpha=1.0, beta=1.0, gamma=0.1, delta=0.5):
+    """
+    Note 3 four-component evaluation:
+    J = alpha*J_E + beta*J_C + gamma*J_S + delta*J_L
+    """
+    return alpha * J_E + beta * J_C + gamma * J_S + delta * J_L
+\end{lstlisting}
+
+
+%==========================================================================
+\part{整合路线图}
+%==========================================================================
+
+\section{优先级排序}
+
+\begin{flowbox}[整合实施路线图]
+\begin{center}
+\begin{tikzpicture}[
+    node distance=0.6cm and 1.5cm,
+    every node/.style={font=\small},
+    box/.style={draw, rounded corners, fill=#1, text width=5.5cm,
+                minimum height=1cm, align=center},
+    arr/.style={-{Stealth[length=3mm]}, thick}
+]
+    \node[box=green!15] (v1) {\textbf{P0: 解析验证} \\ ODE + 1D 稳态 \\ \textit{难度: 低 | 影响: 高}};
+    \node[box=red!15, below=of v1] (v2) {\textbf{P1: $J_{L_2}$ 传感器代表性} \\ 回答``恒温器放哪''核心问题 \\ \textit{难度: 低 | 影响: 极高}};
+    \node[box=orange!15, below=of v2] (v3) {\textbf{P2: $J_C$ 空间舒适度} \\ 2D 温度场积分 RMSE \\ \textit{难度: 中 | 影响: 高}};
+    \node[box=blue!15, below=of v3] (v4) {\textbf{P3: $J_{L_1}$ 时间积分均匀性} \\ 替代终态 std \\ \textit{难度: 中 | 影响: 中}};
+    \node[box=violet!15, below=of v4] (v5) {\textbf{P4: 四分量加权 $J$} \\ 统一 Pareto 分析框架 \\ \textit{难度: 低 | 影响: 中}};
+
+    \draw[arr] (v1) -- (v2);
+    \draw[arr] (v2) -- (v3);
+    \draw[arr] (v3) -- (v4);
+    \draw[arr] (v4) -- (v5);
+\end{tikzpicture}
+\end{center}
+\end{flowbox}
+
+\section{与场景系统的整合}
+
+\begin{comparebox}[新指标在各场景中的预期贡献]
+\begin{center}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{场景} & $J_C$ \textbf{空间版} & $J_{L_1}$ \textbf{均匀性} & $J_{L_2}$ \textbf{传感器} & \textbf{预期洞察} \\
+\midrule
+S1 基线 & 基准 & 基准 & 基准 & 对照组 \\
+S2 窗户 & $\uparrow$ 窗边冷区 & $\uparrow\uparrow$ 不均匀 & $\uparrow$ 看不到冷区 & 窗户效应量化 \\
+S3 窗户对比 & 对比三组 & 双层窗改善 & 大窗更难 & 隔热价值 \\
+S4 开门 & $\uparrow\uparrow$ 门开时飙升 & $\uparrow\uparrow$ 动态变化 & $\uparrow$ 门边冷流 & 通风影响 \\
+S5 长窄 & $\uparrow$ 远端冷 & $\uparrow\uparrow$ 距离效应 & $\uparrow\uparrow$ 位置敏感 & 几何效应 \\
+S6 L 形 & $\uparrow\uparrow$ 死角 & $\uparrow\uparrow\uparrow$ & $\uparrow\uparrow$ 死角看不到 & 最难控制 \\
+S7 多热源 & $\downarrow$ 改善 & $\downarrow\downarrow$ 改善 & --- & 分布加热优势 \\
+S8 多传感器 & --- & --- & $\downarrow\downarrow$ 改善 & 多点感知优势 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{comparebox}
+
+
+\section{总结：三个 Note 的思想在代码中的当前覆盖率}
+
+\begin{keybox}[整体评估]
+\begin{itemize}[nosep]
+\item \textbf{Note 1}（解析推导）覆盖率 \textbf{60\%}：振荡周期和 Zeno 分析已实现，
+但解析解未用于验证（这是一个容易弥补的高价值 Gap）。
+\item \textbf{Note 2}（FDM 格式）覆盖率 \textbf{100\%}：所有离散格式都已正确实现于
+\code{pde\_1d\_model.py} 和 \code{pde\_2d\_model.py}。
+\item \textbf{Note 3}（评价体系）覆盖率 \textbf{40\%}：$J_E$ 和 $J_S$ 已实现，
+但最具区分力的 $J_C$（空间版）、$J_{L_1}$、$J_{L_2}$ 和四分量框架均未实现。
+\end{itemize}
+
+\textbf{最大整合机会}在 Note 3——实现空间评价指标将直接回答项目核心问题
+``恒温器放在哪里最合理？''，并为不同场景的定量对比提供数学基础。
+\end{keybox}
+
+
+\section{自检清单}
+
+\begin{enumerate}[nosep]
+\item[$\square$] 能否复述 Note 1 的 ODE 解析解及其推导？
+\item[$\square$] 能否解释 Note 2 的 $\gamma$ 参数如何统一 insulated 和 Robin BC？
+\item[$\square$] 能否说清 Note 3 的 $J_C$（点版本 vs 空间版本）的区别？
+\item[$\square$] 能否解释 $J_{L_2}$（传感器代表性）为什么对项目核心问题至关重要？
+\item[$\square$] 是否理解代码中 Method of Lines 与 Note 2 全离散格式的等价性？
+\item[$\square$] 是否清楚 6 个 Gap 的优先级及实现方案？
+\end{enumerate}
+
+
+\printbibliography[title={参考文献}]
+
+\end{document}

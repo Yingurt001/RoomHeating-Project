@@ -51,12 +51,16 @@ class HeatEquation2D:
         Ambient temperature.
     T0 : float or ndarray
         Initial temperature.
-    heater_pos : tuple (x, y)
-        Centre of heater.
+    heater_pos : tuple (x, y) or list of tuples
+        Centre(s) of heater(s). In shared mode, multiple heaters share
+        the total power u. In zone control mode, each has independent power.
     heater_radius : float
         Heater influence radius (m).
-    thermostat_pos : tuple (x, y)
-        Position of thermostat sensor.
+    thermostat_pos : tuple (x, y) or list of tuples
+        Position(s) of thermostat sensor(s). Multiple sensors are
+        aggregated according to thermostat_agg.
+    thermostat_agg : str, optional
+        Aggregation for multiple thermostats: 'mean' (default), 'min', 'max'.
     wall_h : dict, optional
         Per-wall h arrays: {'south': array(nx), 'north': array(nx),
         'west': array(ny), 'east': array(ny)}.
@@ -65,13 +69,18 @@ class HeatEquation2D:
         True = active region, False = excluded (e.g. L-shape cutout).
     h_updater : callable(t, model), optional
         Called at each RHS evaluation to update h arrays (time-varying BC).
+    zone_control : bool, optional
+        If True, each heater is controlled independently. u_func receives
+        a list of per-zone temperatures and must return a list of powers.
+        Requires len(heater_pos) == len(thermostat_pos).
     """
 
     def __init__(self, Lx=ROOM_LENGTH, Ly=ROOM_WIDTH, nx=NX, ny=NY,
                  alpha=ALPHA, h_wall=H_WALL, T_a=T_AMBIENT, T0=T_INITIAL,
                  heater_pos=(0.5, 2.0), heater_radius=0.5,
-                 thermostat_pos=(2.5, 2.0),
-                 wall_h=None, domain_mask=None, h_updater=None):
+                 thermostat_pos=(2.5, 2.0), thermostat_agg='mean',
+                 wall_h=None, domain_mask=None, h_updater=None,
+                 zone_control=False):
         self.Lx = Lx
         self.Ly = Ly
         self.nx = nx
@@ -106,36 +115,80 @@ class HeatEquation2D:
         # Time-varying BC callback
         self._h_updater = h_updater
 
+        # Zone control flag
+        self.zone_control = zone_control
+
         # Initial condition
         if np.isscalar(T0):
             self.T0 = np.full((nx, ny), T0)
         else:
             self.T0 = np.array(T0).reshape(nx, ny)
 
-        # Heater profile
-        self.heater_pos = heater_pos
+        # Heater profile (support multiple heaters)
+        if isinstance(heater_pos, list):
+            self.heater_positions = heater_pos
+        else:
+            self.heater_positions = [heater_pos]
+        self.heater_pos = self.heater_positions[0]  # backward compat
         self.heater_radius = heater_radius
         self._heater_profile = self._make_heater_profile()
+        # Per-heater profiles for zone control
+        if zone_control:
+            self._heater_profiles = self._make_heater_profiles()
 
-        # Thermostat position
-        self.thermostat_pos = thermostat_pos
-        self.therm_ix = np.argmin(np.abs(self.x - thermostat_pos[0]))
-        self.therm_iy = np.argmin(np.abs(self.y - thermostat_pos[1]))
+        # Thermostat position (support multiple sensors)
+        self.thermostat_agg = thermostat_agg
+        if isinstance(thermostat_pos, list):
+            self.thermostat_positions = thermostat_pos
+        else:
+            self.thermostat_positions = [thermostat_pos]
+        self.thermostat_pos = self.thermostat_positions[0]  # backward compat
+        self._therm_indices = [
+            (np.argmin(np.abs(self.x - px)), np.argmin(np.abs(self.y - py)))
+            for px, py in self.thermostat_positions
+        ]
+        self.therm_ix = self._therm_indices[0][0]  # backward compat
+        self.therm_iy = self._therm_indices[0][1]
+
+        if zone_control:
+            assert len(self.heater_positions) == len(self.thermostat_positions), \
+                "zone_control requires len(heater_pos) == len(thermostat_pos)"
 
     def _make_heater_profile(self):
-        """Create 2D Gaussian heater profile."""
-        hx, hy = self.heater_pos
+        """Create 2D Gaussian heater profile (sum of all heaters, normalised)."""
         sigma = self.heater_radius
-        profile = np.exp(-0.5 * ((self.X - hx)**2 + (self.Y - hy)**2) / sigma**2)
-        # Normalise so integral over area = Lx * Ly
+        profile = np.zeros_like(self.X)
+        for hx, hy in self.heater_positions:
+            profile += np.exp(-0.5 * ((self.X - hx)**2 + (self.Y - hy)**2) / sigma**2)
+        # Normalise so integral over area = Lx * Ly (total power = u)
         area = np.sum(profile) * self.dx * self.dy
         if area > 0:
             profile = profile / area * self.Lx * self.Ly
         return profile
 
+    def _make_heater_profiles(self):
+        """Per-heater normalised profiles for zone control."""
+        sigma = self.heater_radius
+        profiles = []
+        for hx, hy in self.heater_positions:
+            p = np.exp(-0.5 * ((self.X - hx)**2 + (self.Y - hy)**2) / sigma**2)
+            area = np.sum(p) * self.dx * self.dy
+            if area > 0:
+                p = p / area * self.Lx * self.Ly
+            profiles.append(p)
+        return profiles
+
     def get_thermostat_temperature(self, T_field):
-        """Read temperature at thermostat position."""
-        return T_field[self.therm_ix, self.therm_iy]
+        """Read temperature at thermostat position(s), aggregated."""
+        if len(self._therm_indices) == 1:
+            ix, iy = self._therm_indices[0]
+            return T_field[ix, iy]
+        readings = [T_field[ix, iy] for ix, iy in self._therm_indices]
+        if self.thermostat_agg == 'min':
+            return min(readings)
+        elif self.thermostat_agg == 'max':
+            return max(readings)
+        return sum(readings) / len(readings)  # mean
 
     def rhs(self, t, T_flat, u_func):
         """
@@ -150,9 +203,6 @@ class HeatEquation2D:
         T = T_flat.reshape(self.nx, self.ny)
         dx, dy = self.dx, self.dy
         alpha = self.alpha
-
-        T_therm = self.get_thermostat_temperature(T)
-        u = u_func(t, T_therm)
 
         dTdt = np.zeros_like(T)
 
@@ -206,7 +256,16 @@ class HeatEquation2D:
             dTdt[ix, iy] = alpha * (d2x + d2y)
 
         # Add heater source
-        dTdt += u * self._heater_profile / (self.Lx * self.Ly)
+        if self.zone_control:
+            # Zone control: per-zone temps -> per-heater powers
+            T_zones = [T[ix, iy] for ix, iy in self._therm_indices]
+            u_vals = u_func(t, T_zones)
+            for ui, pi in zip(u_vals, self._heater_profiles):
+                dTdt += ui * pi / (self.Lx * self.Ly)
+        else:
+            T_therm = self.get_thermostat_temperature(T)
+            u = u_func(t, T_therm)
+            dTdt += u * self._heater_profile / (self.Lx * self.Ly)
 
         # Domain mask: freeze excluded regions
         dTdt[~self.mask] = 0.0
@@ -248,6 +307,18 @@ class HeatEquation2D:
 
         nt = len(sol.t)
         T_field = sol.y.reshape(self.nx, self.ny, nt)
-        T_therm = T_field[self.therm_ix, self.therm_iy, :]
+
+        # Aggregated thermostat reading
+        if len(self._therm_indices) == 1:
+            ix, iy = self._therm_indices[0]
+            T_therm = T_field[ix, iy, :]
+        else:
+            readings = np.array([T_field[ix, iy, :] for ix, iy in self._therm_indices])
+            if self.thermostat_agg == 'min':
+                T_therm = readings.min(axis=0)
+            elif self.thermostat_agg == 'max':
+                T_therm = readings.max(axis=0)
+            else:
+                T_therm = readings.mean(axis=0)
 
         return sol.t, T_field, T_therm
